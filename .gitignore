@@ -1,0 +1,38 @@
+# Dependências instaladas localmente
+node_modules/
+
+# Saída do Vite e caches de bundlers
+dist/
+.vite/
+.cache/
+
+# Artefatos temporários das verificações locais
+.verify-engine.mjs
+*.tmp
+*.temp
+
+# Cobertura e relatórios de testes
+coverage/
+*.lcov
+
+# Variáveis de ambiente locais
+.env
+.env.*
+!.env.example
+
+# Logs e dumps gerados por ferramentas
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Arquivos do sistema operacional e editores
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

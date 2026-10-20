@@ -1,0 +1,13 @@
+# Mantém o conteúdo normalizado em LF em qualquer sistema.
+* text=auto eol=lf
+
+# Arquivos binários não devem sofrer conversão de finais de linha.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.pdf binary

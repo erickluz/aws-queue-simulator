@@ -1,0 +1,7 @@
+dialog { width: min(520px, 95vw); max-height: 85vh; overflow-y: auto; }
+dialog label { font-size: 12px; }
+dialog textarea { width: 100%; padding: 10px; color: #e8edf9; background: #0a102866; border: 1px solid #ffffff26; border-radius: 10px; resize: vertical; }
+dialog .check { display: flex; gap: 10px; align-items: center; }
+dialog .check input { width: auto; }
+.form-error { color: #ffb4bd; white-space: pre-wrap; }
+button:disabled { opacity: .45; cursor: not-allowed; }

@@ -1,0 +1,31 @@
+.node {
+  touch-action: none;
+  user-select: none;
+}
+.node.dragging {
+  cursor: grabbing;
+  z-index: 10;
+}
+.node button {
+  touch-action: manipulation;
+}
+.canvas svg, .packet {
+  pointer-events: none;
+}
+.workspace {
+  overflow: auto;
+  min-width: 0;
+}
+.canvas {
+  min-width: 1140px;
+  min-height: 700px;
+  overflow: auto;
+}
+@media (max-width: 900px) {
+  main {
+    height: auto;
+  }
+  aside {
+    display: block;
+  }
+}
