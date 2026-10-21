@@ -6,6 +6,9 @@ export function zoomAt(view:View, scale:number, anchor:{x:number;y:number}):View
   return {scale:next,x:anchor.x-(anchor.x-view.x)*ratio,y:anchor.y-(anchor.y-view.y)*ratio};
 }
 export function worldDelta(delta:number, scale:number) { return delta/scale; }
+export function dragPosition(start:{x:number;y:number},dx:number,dy:number,scale:number) {
+  return {x:start.x+worldDelta(dx,scale),y:start.y+worldDelta(dy,scale)};
+}
 export function fitView(bounds:{x:number;y:number;width:number;height:number},width:number,height:number):View {
   const scale=Math.max(MIN_ZOOM,Math.min(1,(width-80)/Math.max(1,bounds.width),(height-120)/Math.max(1,bounds.height)));
   return {scale,x:(width-bounds.width*scale)/2-bounds.x*scale,y:60+(height-120-bounds.height*scale)/2-bounds.y*scale};
@@ -43,6 +46,9 @@ export class CanvasViewport {
     const nodes=Array.from(this.canvas.querySelectorAll<HTMLElement>('.node'));
     if(!nodes.length) {this.view={x:24,y:80,scale:1};this.apply();return;}
     const boxes=nodes.map(n=>({x:n.offsetLeft,y:n.offsetTop,width:n.offsetWidth,height:n.offsetHeight}));
+    this.canvas.querySelectorAll<SVGPathElement>('.connection-path').forEach(path=>{
+      const b=path.getBBox();boxes.push({x:b.x,y:b.y,width:b.width,height:b.height});
+    });
     this.canvas.querySelectorAll<SVGGElement>('.connection-box').forEach(g=>{
       const b=g.getBBox(),matrix=g.transform.baseVal.consolidate()?.matrix;
       boxes.push({x:b.x+(matrix?.e??0),y:b.y+(matrix?.f??0),width:b.width,height:b.height});

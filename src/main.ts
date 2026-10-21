@@ -4,10 +4,11 @@ import './glass.css';
 import './ui/editor.css';
 import './ui/card-details.css';
 import './ui/workspace.css';
-import { CanvasViewport, worldDelta } from './ui/viewport';
+import { CanvasViewport, dragPosition } from './ui/viewport';
 import { allResources, details, escapeHtml as esc, mountInspector } from './ui/card-details';
 import { openResourceDialog } from './ui/resource-editor';
-import { connectionCurve, curvePath, curvePoint } from './ui/flow';
+import { connectionCurve, curvePath, curvePoint, type FlowRoute } from './ui/flow';
+import { retryRoute } from './ui/retry-route';
 import { connectionInfo } from './ui/connections';
 import { placeLabel, type Box } from './ui/connection-layout';
 import { workerStatus } from './ui/worker-status';
@@ -107,16 +108,16 @@ function action(value:string) {
   }
   refresh();
 }
-function edgeCurve(from:string,to:string) {
+const drawnRoutes=new Map<string,FlowRoute>();
+const routeKey=(from:string,to:string)=>JSON.stringify([from,to]);
+function edgeCurve(from:string,to:string,labels:Box[]=[]) {
   const a=resources().find(r=>r.id===from),b=resources().find(r=>r.id===to);
   const elements=Array.from(app.querySelectorAll<HTMLElement>('.node'));
   const ae=elements.find(e=>e.dataset.id===from),be=elements.find(e=>e.dataset.id===to);
   if(!a||!b||!ae||!be||from===to) return;
   if(a.kind==='consumer'&&b.kind==='queue') {
-    const start={x:a.position.x+ae.offsetWidth/2,y:a.position.y+ae.offsetHeight};
-    const end={x:b.position.x+be.offsetWidth/2,y:b.position.y+be.offsetHeight};
-    const bottom=Math.max(start.y,end.y)+160;
-    return {from:start,to:end,c1:{x:start.x,y:bottom},c2:{x:end.x,y:bottom}};
+    const box=(el:HTMLElement):Box=>({x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight});
+    return retryRoute(box(ae),box(be),[...elements.filter(el=>el!==ae&&el!==be).map(box),...labels]);
   }
   if(a.position.x===b.position.x) return connectionCurve(
     {x:a.position.x+ae.offsetWidth/2,y:a.position.y+ae.offsetHeight},
@@ -125,6 +126,7 @@ function edgeCurve(from:string,to:string) {
 }
 function updateConnections() {
   const svg=app.querySelector('svg'); if(!svg) return;
+  drawnRoutes.clear();
   const obstacles:Box[]=Array.from(app.querySelectorAll<HTMLElement>('.node')).map(n=>({x:n.offsetLeft,y:n.offsetTop,width:n.offsetWidth,height:n.offsetHeight}));
   const edges=connectionInfo(engine.state.topology);
   // Manual retries and edits during a return still retain a visible return path.
@@ -133,19 +135,31 @@ function updateConnections() {
   }
   svg.innerHTML='<defs><marker id="retry-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><polygon points="0,0 10,5 0,10" fill="#fb7185"/></marker></defs>'+edges.map(e=>{
     const curve=edgeCurve(e.from,e.to); if(!curve) return '';
+    drawnRoutes.set(routeKey(e.from,e.to),curve);
     const mid=curvePoint(curve,.5), words=e.label.split(' · ');
-    return `<g class="flow-connection ${e.label.startsWith('Retry')?'retry-connection':''}"><title>${esc(e.label)}</title><path class="connection-path" d="${curvePath(curve)}" ${e.label.startsWith('Retry')?'marker-end="url(#retry-arrow)"':''}/>
+    return `<g data-from="${esc(e.from)}" data-to="${esc(e.to)}" class="flow-connection ${e.label.startsWith('Retry')?'retry-connection':''}"><title>${esc(e.label)}</title><path class="connection-path" d="${curvePath(curve)}" ${e.label.startsWith('Retry')?'marker-end="url(#retry-arrow)"':''}/>
       <path class="label-leader"/><g class="connection-box" data-anchor-x="${mid.x}" data-anchor-y="${mid.y}"><rect rx="9"/>
       <text class="connection-label" x="12" y="23">
       ${words.flatMap(w=>w.match(/.{1,32}/gu)??['']).map((w,i)=>`<tspan x="12" dy="${i?18:0}">${esc(w)}</tspan>`).join('')}</text></g></g>`;
   }).join('')+'<g class="flow-particles"></g>';
+  const placed=new Map<Element,Box>();
   svg.querySelectorAll<SVGGElement>('.connection-box').forEach(group=>{
     const bounds=group.querySelector('text')!.getBBox();
     const anchor={x:Number(group.dataset.anchorX),y:Number(group.dataset.anchorY)};
     const box=placeLabel(anchor,Math.ceil(bounds.width)+24,Math.ceil(bounds.height)+24,obstacles);
     obstacles.push(box);group.setAttribute('transform',`translate(${box.x} ${box.y})`);
+    placed.set(group.parentElement!,box);
     const rect=group.querySelector('rect')!;rect.setAttribute('width',String(box.width));rect.setAttribute('height',String(box.height));
     group.parentElement!.querySelector('.label-leader')!.setAttribute('d',`M ${anchor.x} ${anchor.y} L ${box.x+box.width/2} ${box.y+box.height/2}`);
+  });
+  svg.querySelectorAll<SVGGElement>('.retry-connection').forEach(group=>{
+    const from=group.dataset.from!,to=group.dataset.to!;
+    const route=edgeCurve(from,to,[...placed].filter(([owner])=>owner!==group).map(([,box])=>box));
+    const key=routeKey(from,to);
+    if(route) {drawnRoutes.set(key,route);group.querySelector('.connection-path')!.setAttribute('d',curvePath(route));}
+    else {drawnRoutes.delete(key);group.querySelector('.connection-path')!.setAttribute('d','');}
+    // The return label is adjacent to the route; do not draw a leader across intervening cards.
+    group.querySelector('.label-leader')!.setAttribute('d','');
   });
 }
 function animateFlow() {
@@ -165,7 +179,7 @@ function animateFlow() {
     const elapsed=time-a.startedAt;
     if(elapsed<0||elapsed>=a.duration||a.nodes.length<2) return [];
     const segment=Math.floor(elapsed/SEGMENT_DURATION);
-    const curve=edgeCurve(a.nodes[segment],a.nodes[segment+1]); if(!curve) return [];
+    const curve=drawnRoutes.get(routeKey(a.nodes[segment],a.nodes[segment+1])); if(!curve) return [];
     const siblings=engine.state.animations.filter(other=>other.fromId===a.fromId&&other.toId===a.toId&&other.startedAt===a.startedAt);
     const progress=(elapsed%SEGMENT_DURATION)/SEGMENT_DURATION;
     const separation=siblings.length>1?(siblings.indexOf(a)/(siblings.length-1)-.5)*.35*Math.sin(Math.PI*progress):0;
@@ -189,7 +203,7 @@ function drag(el:HTMLElement) {
     if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>4) moved=true;
     if(!moved) return;
     const r=resources().find(r=>r.id===el.dataset.id)!;
-    r.position={x:Math.max(0,start.left+worldDelta(e.clientX-start.x,viewport.view.scale)),y:Math.max(60,start.top+worldDelta(e.clientY-start.y,viewport.view.scale))};
+    r.position=dragPosition({x:start.left,y:start.top},e.clientX-start.x,e.clientY-start.y,viewport.view.scale);
     el.style.left=`${r.position.x}px`;el.style.top=`${r.position.y}px`; updateConnections();
   };
   const finish=(cancel=false)=>{

@@ -41,7 +41,7 @@ try {
     const obstacles:Box[]=[{x:0,y:0,width:400,height:400},{x:300,y:200,width:400,height:400}];
     for(let i=0;i<15;i++) {
       const b=placeLabel(anchor,150+i*7,60+(i%3)*20,obstacles);
-      assert(b.x>=0&&b.y>=0&&!obstacles.some(o=>overlaps(b,o)),'Caixas não sobrepõem cards nem outros rótulos');
+      assert(!obstacles.some(o=>overlaps(b,o)),'Caixas não sobrepõem cards nem outros rótulos');
       obstacles.push(b);
     }
   }
