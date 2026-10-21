@@ -25,7 +25,7 @@
 - [ ] 4.1 Implementar cartões, conexões, reposicionamento e animações para produtor, tópico, assinatura, fila e consumidor AWS; verificar criação, remoção e movimentação de cada tipo de nó.
 - [ ] 4.2 Implementar editor e modais de tópico, fila, assinatura, produtor e consumidor com ações SQS de polling, exclusão e alteração de visibilidade; verificar todos os limites e mensagens definidos nos specs.
 - [ ] 4.3 Implementar sidebar, inspector e filtros de log para atributos, receipt handle, ApproximateReceiveCount, métricas de disponibilidade, redrive, timeout, retenção e deduplicação; verificar uma mensagem disponível e uma em voo.
-- [ ] 4.4 Criar presets SNS fan-out, filtro de atributo, FIFO/deduplicação e retry/redrive; verificar os resultados observáveis de cada preset contra os specs.
+- [x] 4.4 Criar presets SNS fan-out, filtro de atributo, FIFO/deduplicação e retry/redrive; verificar os resultados observáveis de cada preset contra os specs.
 - [ ] 4.5 Implementar importação/exportação exclusiva do formato AWS e rejeição explícita de topologia AMQP; verificar reimportação do próprio arquivo e rejeição de arquivo de outro domínio.
 - [ ] 4.6 Criar guia e README do novo repositório explicando SNS, SQS, limites didáticos e diferenças em relação a RabbitMQ; verificar que nenhum fluxo AMQP é apresentado como funcionalidade do produto.
 

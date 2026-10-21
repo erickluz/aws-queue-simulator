@@ -24,9 +24,9 @@ export function openResourceDialog(engine: AwsSimulationEngine, kind: ResourceKi
     if(!form.reportValidity()) return;
     const data=new FormData(form), get=(key:string)=>String(data.get(key)??'').trim(), id=`${kind}-${crypto.randomUUID()}`;
     const all=[...t.producers,...t.topics,...t.queues,...t.subscriptions,...t.consumers];
-    const x={producer:70,topic:300,subscription:540,queue:740,consumer:1000}[kind];
+    const x={producer:30,topic:450,subscription:870,queue:1290,consumer:1730}[kind];
     let y=80;
-    while(all.some(n=>Math.abs(n.position.x-x)<180&&Math.abs(n.position.y-y)<155)) y+=160;
+    while(all.some(n=>Math.abs(n.position.x-x)<280&&Math.abs(n.position.y-y)<480)) y+=480;
     const position={x,y};
     try {
       const queueKind=get('queueKind') as QueueKind;

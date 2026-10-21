@@ -13,5 +13,11 @@ aside textarea { width:100%; padding:10px; background:#0a102866; color:#e8edf9; 
 aside .check { display:flex; align-items:center; gap:8px; }
 aside .check input { width:auto; }
 .editor-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.connection-label { fill:#b6c6e1; font-size:9px; font-family:ui-monospace,monospace; paint-order:stroke; stroke:#10172b; stroke-width:5px; stroke-linejoin:round; }
+.flow-connection { pointer-events:all; }
+.canvas::after { content:"Clique para editar · Arraste para organizar · Ações no painel lateral"; }
+.queue-preview i { width:14px; height:14px; border-radius:50%; background:#ff3b52; color:transparent; padding:0; box-shadow:0 0 8px #ff304f50; }
+.queue-preview i[title="delayed"] { background:#8493af; }
+button:disabled { opacity:.45; cursor:not-allowed; }
 main { grid-template-columns: minmax(0,1fr) 350px; }
 @media(max-width:1100px) { main { grid-template-columns:minmax(0,1fr); } }

@@ -1,5 +1,6 @@
 # Dependências instaladas localmente
 node_modules/
+.worktrees/
 
 # Saída do Vite e caches de bundlers
 dist/
