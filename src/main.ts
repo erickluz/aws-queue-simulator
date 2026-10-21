@@ -2,6 +2,8 @@ import './style.css';
 import './interaction.css';
 import './glass.css';
 import './ui/editor.css';
+import './ui/card-details.css';
+import { details, mountInspector } from './ui/card-details';
 import { openResourceDialog } from './ui/resource-editor';
 import { connectionCurve, curvePath, curvePoint } from './ui/flow';
 import { AwsSimulationEngine } from './core/engine';
@@ -19,6 +21,15 @@ function action(value: string) { const [kind, id] = value.split(':'); if (kind==
 function modal(kind:string) { const dialog=app.querySelector<HTMLDialogElement>('#modal')!; app.querySelector('#modal-title')!.textContent=`Criar ${kind}`; const fields=app.querySelector('#modal-fields')!; fields.innerHTML=kind==='queue'?'<label>Nome<input name="name" required value="new-queue" /></label><label>Tipo<select name="queueKind"><option value="standard">Standard</option><option value="fifo">FIFO</option></select></label><label>Delay (0–900s)<input name="delay" type="number" value="0" /></label><label>Visibility (0–43200s)<input name="visibility" type="number" value="30" /></label>':`<label>Nome<input name="name" required value="new-${kind}" /></label>`; app.querySelector<HTMLButtonElement>('#save')!.onclick=e=>{e.preventDefault();const f=new FormData(dialog.querySelector('form')!);const name=String(f.get('name'));if(kind==='queue')engine.addQueue({id:uid('queue'),kind:'queue',name,queueKind:String(f.get('queueKind')) as 'standard'|'fifo',delaySeconds:Number(f.get('delay')),visibilityTimeout:Number(f.get('visibility')),retentionSeconds:345600,longPollingSeconds:0,position:pos(640,80+engine.state.topology.queues.length*135),metrics:{sent:0,available:0,delayed:0,inFlight:0,received:0,deleted:0,redriven:0,deduplicated:0,expired:0}});else if(kind==='topic')engine.addTopic({id:uid('topic'),kind:'topic',name,queueKind:'standard',contentDeduplication:false,position:pos(360,80),published:0}); else alert('Selecione recursos existentes no cenário para criar esta conexão no editor completo.');dialog.close();};dialog.showModal(); }
 let dragging = false;
 let logFilter = 'all';
+let selectedId: string | undefined;
+let editorHost: HTMLElement | undefined;
+function selectResource(id?: string) {
+  selectedId=id;
+  editorHost=undefined;
+  (document.activeElement as HTMLElement | null)?.blur();
+  refresh();
+  app.querySelector('aside')?.scrollTo({top:0});
+}
 function resources() {
   const t = engine.state.topology;
   return [...t.producers, ...t.topics, ...t.subscriptions, ...t.queues, ...t.consumers];
@@ -56,6 +67,8 @@ function captureDeliveries() {
   const t = engine.state.topology;
   if (visualTopology !== t) {
     routes.clear();
+    selectedId=undefined;
+    editorHost=undefined;
     visualTopology = t;
   }
   for (const animation of engine.state.animations) {
@@ -93,6 +106,7 @@ function animateFlow() {
   requestAnimationFrame(animateFlow);
 }
 function drag(el: HTMLElement) {
+  let moved = false;
   let start: { x: number; y: number; left: number; top: number; pointer: number } | undefined;
   el.onpointerdown = event => {
     if (event.button !== 0 || (event.target as HTMLElement).closest('button,input,select,textarea,a')) return;
@@ -100,12 +114,15 @@ function drag(el: HTMLElement) {
     if (!resource) return;
     start = { x: event.clientX, y: event.clientY, left: resource.position.x, top: resource.position.y, pointer: event.pointerId };
     dragging = true;
+    moved = false;
     el.classList.add('dragging');
     el.setPointerCapture(event.pointerId);
     event.preventDefault();
   };
   el.onpointermove = event => {
     if (!start || event.pointerId !== start.pointer) return;
+    if(Math.hypot(event.clientX-start.x,event.clientY-start.y)>4) moved=true;
+    if(!moved) return;
     const resource = resources().find(item => item.id === el.dataset.id);
     if (!resource) return;
     resource.position = {
@@ -123,11 +140,16 @@ function drag(el: HTMLElement) {
     dragging = false;
     el.classList.remove('dragging');
     if (el.hasPointerCapture(pointer)) el.releasePointerCapture(pointer);
-    refresh();
+    if(!moved) selectResource(el.dataset.id);
+    else refresh();
   };
   el.onpointerup = finish;
   el.onpointercancel = finish;
   el.onlostpointercapture = finish;
+  el.tabIndex=0;
+  el.onkeydown=event=>{
+    if(event.target===el&&(event.key==='Enter'||event.key===' ')) {event.preventDefault();selectResource(el.dataset.id);}
+  };
 }
 function refresh() {
   captureDeliveries();
@@ -135,7 +157,33 @@ function refresh() {
   if (dragging || app.querySelector<HTMLDialogElement>('dialog')?.open ||
       app.querySelector('input:focus,select:focus,textarea:focus')) return;
   const sidebarScroll = app.querySelector('aside')?.scrollTop ?? 0;
+  editorHost?.remove();
   render();
+  for(const element of Array.from(app.querySelectorAll<HTMLElement>('.node'))) {
+    const resource=resources().find(r=>r.id===element.dataset.id)!;
+    element.classList.toggle('selected',resource.id===selectedId);
+    const extra=document.createElement('div');
+    extra.innerHTML=details(resource,engine.state.topology);
+    element.append(extra);
+    const inspect=document.createElement('button');
+    inspect.textContent='Inspecionar / editar';
+    inspect.onclick=()=>selectResource(resource.id);
+    element.append(inspect);
+  }
+  if(selectedId) {
+    const resource=resources().find(r=>r.id===selectedId);
+    if(resource) {
+      if(!editorHost) {
+        editorHost=document.createElement('section');
+        mountInspector(editorHost,resource,engine.state.topology,()=>{
+          editorHost=undefined;
+          (document.activeElement as HTMLElement | null)?.blur();
+          refresh();
+        },()=>selectResource());
+      }
+      app.querySelector('aside')!.prepend(editorHost);
+    } else {selectedId=undefined;editorHost=undefined;}
+  }
   for (const kind of ['topic','queue','subscription','producer','consumer'] as const) {
     app.querySelector<HTMLButtonElement>(`[data-action="${kind}"]`)!.onclick = () => openResourceDialog(engine, kind, refresh);
   }
@@ -146,8 +194,11 @@ function refresh() {
     button.onclick = () => {
       const body = JSON.stringify({orderId:crypto.randomUUID()});
       const options = target?.queueKind === 'fifo' ? {groupId:'pedidos',deduplicationId:crypto.randomUUID()} : {};
-      if (target?.kind === 'queue') engine.sendFromProducer(producer.id,body,{eventType:'order.created'},options);
-      else engine.publish(producer.targetId,body,{eventType:'order.created'},options);
+      const error = target?.kind === 'queue'
+        ? engine.sendFromProducer(producer.id,body,{eventType:'order.created'},options)
+        : engine.publish(producer.targetId,body,{eventType:'order.created'},options);
+      if(!error) producer.sent++;
+      refresh();
     };
   });
   updateConnections();

@@ -1,6 +1,7 @@
 import { AwsSimulationEngine, emptyTopology } from './core/engine';
 import { importTopology } from './domain/serialization';
 import type { SqsQueue } from './domain/types';
+import { updateResource } from './ui/card-details';
 
 const assert = (condition: unknown, message: string) => { if (!condition) throw new Error(message); };
 const queue = (id: string, kind: 'standard' | 'fifo' = 'standard'): SqsQueue => ({ id, kind: 'queue', name: kind === 'fifo' ? `${id}.fifo` : id, queueKind: kind, delaySeconds: 0, visibilityTimeout: 0, retentionSeconds: 60, longPollingSeconds: 0, position: { x: 0, y: 0 }, metrics: { sent: 0, available: 0, delayed: 0, inFlight: 0, received: 0, deleted: 0, redriven: 0, deduplicated: 0, expired: 0 } });
@@ -26,4 +27,14 @@ try {
   engine.poll('c');
   assert(engine.state.topology.messages[0].state === 'in-flight', 'Recursos criados devem participar do fluxo SQS');
   console.log('Resource creation verification passed');
+  const editTopology=engine.state.topology;
+  const originalMessage=editTopology.messages[0];
+  const before=JSON.stringify(editTopology);
+  assert(Boolean(updateResource(editTopology,'destination',{visibilityTimeout:43201})), 'Edição inválida deve ser rejeitada');
+  assert(JSON.stringify(editTopology)===before,'Edição inválida deve preservar a topologia inteira');
+  assert(!updateResource(editTopology,'destination',{name:'renamed',visibilityTimeout:45}),'Edição válida deve funcionar');
+  assert(editTopology.queues[0].visibilityTimeout===45,'Visibilidade deve ser atualizada');
+  assert(editTopology.messages[0]===originalMessage,'Edição deve preservar mensagens em voo');
+  assert(editTopology.consumers[0].queueId==='destination','Renomear não deve quebrar referências');
+  console.log('Card editing verification passed');
 } finally { engine.destroy(); }
