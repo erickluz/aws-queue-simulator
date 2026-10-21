@@ -42,8 +42,13 @@ export class CanvasViewport {
     if(!this.viewport||!this.canvas) return;
     const nodes=Array.from(this.canvas.querySelectorAll<HTMLElement>('.node'));
     if(!nodes.length) {this.view={x:24,y:80,scale:1};this.apply();return;}
-    const x=Math.min(...nodes.map(n=>n.offsetLeft)), y=Math.min(...nodes.map(n=>n.offsetTop));
-    this.view=fitView({x,y,width:Math.max(...nodes.map(n=>n.offsetLeft+n.offsetWidth))-x,height:Math.max(...nodes.map(n=>n.offsetTop+n.offsetHeight))-y},this.viewport.clientWidth,this.viewport.clientHeight);
+    const boxes=nodes.map(n=>({x:n.offsetLeft,y:n.offsetTop,width:n.offsetWidth,height:n.offsetHeight}));
+    this.canvas.querySelectorAll<SVGGElement>('.connection-box').forEach(g=>{
+      const b=g.getBBox(),matrix=g.transform.baseVal.consolidate()?.matrix;
+      boxes.push({x:b.x+(matrix?.e??0),y:b.y+(matrix?.f??0),width:b.width,height:b.height});
+    });
+    const x=Math.min(...boxes.map(b=>b.x)),y=Math.min(...boxes.map(b=>b.y));
+    this.view=fitView({x,y,width:Math.max(...boxes.map(b=>b.x+b.width))-x,height:Math.max(...boxes.map(b=>b.y+b.height))-y},this.viewport.clientWidth,this.viewport.clientHeight);
     this.apply();
   }
   bind(viewport:HTMLElement,canvas:HTMLElement,controls:HTMLElement,gesture:(active:boolean)=>void) {

@@ -9,8 +9,9 @@ import { allResources, details, escapeHtml as esc, mountInspector } from './ui/c
 import { openResourceDialog } from './ui/resource-editor';
 import { connectionCurve, curvePath, curvePoint } from './ui/flow';
 import { connectionInfo } from './ui/connections';
+import { placeLabel, type Box } from './ui/connection-layout';
 import { createPreset } from './ui/presets';
-import { AwsSimulationEngine } from './core/engine';
+import { AwsSimulationEngine, emptyTopology } from './core/engine';
 import { SEGMENT_DURATION } from './core/delivery';
 import { exportTopology, importTopology } from './domain/serialization';
 import type { ResourceKind } from './domain/types';
@@ -38,7 +39,7 @@ function render() {
   const width=Math.max(1900,...resources().map(r=>r.position.x+340));
   const height=Math.max(1000,...resources().map(r=>r.position.y+600));
   app.innerHTML=`<header><div><b>AWS Queue Lab</b><span>SNS + SQS visual simulator</span></div><nav>
-    ${button('Novo tópico','topic')}${button('Nova fila','queue')}${button('Assinatura','subscription')}${button('Produtor','producer')}${button('Consumidor','consumer')}${button('Exportar','export')}
+    ${button('Novo','new')}${button('Novo tópico','topic')}${button('Nova fila','queue')}${button('Assinatura','subscription')}${button('Produtor','producer')}${button('Consumidor','consumer')}${button('Exportar','export')}
     <label class="file">Importar<input id="import" type="file" accept="application/json"></label></nav></header>
     <main><section class="workspace"><div class="canvas-controls" role="toolbar" aria-label="Navegação do canvas">
       <button data-view="out" aria-label="Diminuir zoom">−</button><output aria-live="polite">100%</output><button data-view="in" aria-label="Aumentar zoom">+</button>
@@ -62,6 +63,19 @@ function render() {
 function action(value:string) {
   const split=value.indexOf(':');
   const kind=split<0?value:value.slice(0,split), id=split<0?'':value.slice(split+1);
+  if(kind==='new') {
+    if(resources().length&&!confirm('Criar um cenário vazio? Todos os cards, mensagens e eventos deste cenário serão removidos.')) return;
+    selectedId=undefined;editorHost=undefined;logFilter='all';
+    engine.load(emptyTopology());viewport.fit();return;
+  }
+  if(kind==='remove') {
+    const ids=engine.removalIds(id), affected=resources().filter(r=>ids.has(r.id));
+    if(!affected.length) return;
+    const names=affected.map(r=>'name' in r?r.name:'Assinatura SNS').join(', ');
+    if(!confirm(`Excluir: ${names}?\nConexões dependentes e mensagens das filas excluídas serão removidas. Ao excluir um consumidor, sua mensagem aguarda o timeout na fila.`)) return;
+    selectedId=undefined;editorHost=undefined;
+    engine.removeResource(id);return;
+  }
   if(['topic','queue','subscription','producer','consumer'].includes(kind)) {
     openResourceDialog(engine,kind as ResourceKind,refresh); return;
   }
@@ -104,13 +118,23 @@ function edgeCurve(from:string,to:string) {
 }
 function updateConnections() {
   const svg=app.querySelector('svg'); if(!svg) return;
+  const obstacles:Box[]=Array.from(app.querySelectorAll<HTMLElement>('.node')).map(n=>({x:n.offsetLeft,y:n.offsetTop,width:n.offsetWidth,height:n.offsetHeight}));
   svg.innerHTML=connectionInfo(engine.state.topology).map(e=>{
     const curve=edgeCurve(e.from,e.to); if(!curve) return '';
     const mid=curvePoint(curve,.5), words=e.label.split(' · ');
     return `<g class="flow-connection"><title>${esc(e.label)}</title><path d="${curvePath(curve)}"/>
-      <text class="connection-label" x="${mid.x}" y="${mid.y-30}" text-anchor="middle">
-      ${words.map((w,i)=>`<tspan x="${mid.x}" dy="${i?14:0}">${esc(w.length>25?w.slice(0,24)+'…':w)}</tspan>`).join('')}</text></g>`;
+      <path class="label-leader"/><g class="connection-box" data-anchor-x="${mid.x}" data-anchor-y="${mid.y}"><rect rx="9"/>
+      <text class="connection-label" x="12" y="23">
+      ${words.flatMap(w=>w.match(/.{1,32}/gu)??['']).map((w,i)=>`<tspan x="12" dy="${i?18:0}">${esc(w)}</tspan>`).join('')}</text></g></g>`;
   }).join('')+'<g class="flow-particles"></g>';
+  svg.querySelectorAll<SVGGElement>('.connection-box').forEach(group=>{
+    const bounds=group.querySelector('text')!.getBBox();
+    const anchor={x:Number(group.dataset.anchorX),y:Number(group.dataset.anchorY)};
+    const box=placeLabel(anchor,Math.ceil(bounds.width)+24,Math.ceil(bounds.height)+24,obstacles);
+    obstacles.push(box);group.setAttribute('transform',`translate(${box.x} ${box.y})`);
+    const rect=group.querySelector('rect')!;rect.setAttribute('width',String(box.width));rect.setAttribute('height',String(box.height));
+    group.parentElement!.querySelector('.label-leader')!.setAttribute('d',`M ${anchor.x} ${anchor.y} L ${box.x+box.width/2} ${box.y+box.height/2}`);
+  });
 }
 function animateFlow() {
   const layer=app.querySelector('.flow-particles'),time=Date.now();
@@ -180,7 +204,7 @@ function refresh() {
   actions.innerHTML=selected?`<h2>Ações do recurso</h2>${
     selected.kind==='producer'?button(engine.queue(selected.targetId)?'Enviar SQS':'Publicar SNS',`publish:${selected.id}`):
     selected.kind==='consumer'?button('Receber mensagem (polling)',`poll:${selected.id}`):
-    '<p>Edite as propriedades acima.</p>'}`:'<h2>Inspector</h2><p>Clique em um card para editar e acessar suas ações. Arraste para reposicionar.</p>';
+    '<p>Edite as propriedades acima.</p>'}${button('Excluir card',`remove:${selected.id}`)}`:'<h2>Inspector</h2><p>Clique em um card para editar e acessar suas ações. Arraste para reposicionar.</p>';
   if(selected?.kind==='consumer'&&selected.status==='busy') actions.querySelector('button')!.disabled=true;
   app.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action!));
   app.querySelector<HTMLInputElement>('#import')!.onchange=async e=>{

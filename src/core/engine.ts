@@ -22,6 +22,32 @@ export class AwsSimulationEngine {
   }
   private recalculate() { for (const queue of this.state.topology.queues) queue.metrics = metrics(); for (const message of this.state.topology.messages) { const queue = this.queue(message.queueId); if (!queue) continue; if (message.state === 'available') queue.metrics.available++; if (message.state === 'delayed') queue.metrics.delayed++; if (message.state === 'in-flight') queue.metrics.inFlight++; if (message.state === 'deleted') queue.metrics.deleted++; if (message.state === 'redriven') queue.metrics.redriven++; if (message.state === 'expired') queue.metrics.expired++; if (message.state === 'deduplicated') queue.metrics.deduplicated++; } }
   load(topology: AwsTopology) { this.waiting.clear(); this.jobs.clear(); this.nextPoll.clear(); this.state = { topology: structuredClone(topology), animations: [], logs: [] }; this.emit(); }
+  removalIds(resourceId:string) {
+    const t=this.state.topology, ids=new Set([resourceId]);
+    t.producers.filter(p=>p.targetId===resourceId).forEach(p=>ids.add(p.id));
+    t.subscriptions.filter(s=>s.topicId===resourceId||s.queueId===resourceId).forEach(s=>ids.add(s.id));
+    t.consumers.filter(c=>c.queueId===resourceId).forEach(c=>ids.add(c.id));
+    return ids;
+  }
+  removeResource(resourceId:string) {
+    const t=this.state.topology, ids=this.removalIds(resourceId);
+    for(const m of t.messages) {
+      if(m.consumerId&&ids.has(m.consumerId)) this.releaseWorker(m);
+      if(m.queueId&&ids.has(m.queueId)) this.jobs.delete(m.id);
+    }
+    t.messages=t.messages.filter(m=>!m.queueId||!ids.has(m.queueId));
+    t.producers=t.producers.filter(r=>!ids.has(r.id));
+    t.topics=t.topics.filter(r=>!ids.has(r.id));
+    t.queues=t.queues.filter(r=>!ids.has(r.id));
+    t.subscriptions=t.subscriptions.filter(r=>!ids.has(r.id));
+    t.consumers=t.consumers.filter(r=>!ids.has(r.id));
+    for(const q of t.queues) if(q.deadLetterQueueId&&ids.has(q.deadLetterQueueId)) {
+      q.deadLetterQueueId=undefined;q.maxReceiveCount=undefined;
+    }
+    for(const resource of ids) {this.waiting.delete(resource);this.nextPoll.delete(resource);}
+    this.state.animations=this.state.animations.filter(a=>!a.nodes.some(n=>ids.has(n))&&t.messages.some(m=>m.id===a.messageId));
+    this.emit();
+  }
   queue(queueId?: string) { return this.state.topology.queues.find(item => item.id === queueId); }
   topic(topicId?: string) { return this.state.topology.topics.find(item => item.id === topicId); }
   addProducer(producer: Producer) {
