@@ -6,6 +6,7 @@ node_modules/
 dist/
 .vite/
 .cache/
+docs/
 
 # Artefatos temporários das verificações locais
 .verify-engine.mjs
