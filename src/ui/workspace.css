@@ -1,0 +1,40 @@
+:root { font-size:16px; }
+body { overflow:hidden; }
+header { height:auto; min-height:92px; margin-top:12px; }
+header span { font-size:13px; }
+header nav { justify-content:flex-end; }
+button, .file, header .file, aside section:last-child button { font-size:14px; }
+main { height:calc(100dvh - 124px); grid-template-columns:minmax(0,1fr) 390px; }
+h2 { font-size:17px; }
+p, li, label, input, select, textarea { font-size:14px; line-height:1.5; }
+aside textarea { font-family:ui-monospace,monospace; font-size:14px; }
+.node { width:260px; padding:18px; }
+.node.ASSINATURA { width:240px; }
+.node strong { font-size:17px; line-height:1.4; }
+.node small { font-size:12px; letter-spacing:.6px; }
+.node span, .node em, .card-stats span, .card-stats b { font-size:13px; }
+.card-stats > div { align-items:start; }
+.card-stats span { flex-shrink:1; }
+.card-stats b { max-width:65%; }
+.queue-preview { font-size:12px; min-height:40px; }
+.connection-label { font-size:12px; }
+.message small { font-size:12px; }
+.message button { margin:4px 3px 4px 0; }
+.workspace { position:relative; overflow:hidden; min-width:0; min-height:420px; padding:0; }
+.canvas-viewport { position:absolute; inset:0; overflow:hidden; touch-action:none; outline:none; background:radial-gradient(circle,#bdcaff20 1px,transparent 1px) 0 0/24px 24px,#0c1325; }
+.canvas-viewport:focus-visible { box-shadow:inset 0 0 0 2px #a799ff; }
+.canvas { position:absolute; left:0; top:0; min-width:0; min-height:0; transform-origin:0 0; overflow:visible; border:0; border-radius:0; background:none; }
+.canvas::before,.canvas::after { display:none; }
+.canvas-viewport { cursor:grab; }
+.canvas-viewport.panning, .canvas-viewport.panning .node { cursor:grabbing; }
+.canvas-viewport.hand-ready .node { cursor:grab; }
+.canvas-controls { position:absolute; top:12px; left:12px; right:12px; display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:8px; border-radius:14px; border:1px solid #ffffff24; background:#182039ed; box-shadow:0 8px 24px #0004; z-index:20; }
+.canvas-controls output { min-width:50px; text-align:center; font-size:14px; }
+.canvas-controls span { font-size:12px; color:#bac9e1; margin-left:8px; }
+.canvas-controls button { min-width:38px; }
+@media(max-width:1100px) {
+  body { overflow:auto; }
+  main { height:auto; grid-template-columns:1fr; }
+  .workspace { height:70dvh; min-height:500px; }
+  aside { display:block; max-height:none; }
+}

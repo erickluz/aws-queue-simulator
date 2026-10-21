@@ -1,18 +1,27 @@
 import type { Animation, AwsTopology, Consumer, Producer, LogEvent, SimMessage, SimulationState, SnsTopic, SqsQueue, Subscription } from '../domain/types';
 import { compatibleKinds, validateQueue, validateTopic } from '../domain/validation';
+import { SEGMENT_DURATION } from './delivery';
+import { workerConfig, validateWorker, type WorkerConfig } from '../domain/worker';
 
 const now = () => Date.now(); const id = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 const metrics = () => ({ sent: 0, available: 0, delayed: 0, inFlight: 0, received: 0, deleted: 0, redriven: 0, deduplicated: 0, expired: 0 });
 export const emptyTopology = (): AwsTopology => ({ format: 'aws-queue-simulator/v1', name: 'Topologia AWS', producers: [], topics: [], queues: [], subscriptions: [], consumers: [], messages: [] });
 export class AwsSimulationEngine {
+  private waiting = new Map<string,number>();
+  private jobs = new Map<string,{receipt:string; config:WorkerConfig}>();
+  private nextPoll = new Map<string,number>();
   state: SimulationState = { topology: emptyTopology(), animations: [], logs: [] }; private listeners = new Set<() => void>(); private timer = globalThis.setInterval(() => this.tick(), 500);
   subscribe(listener: () => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   destroy() { clearInterval(this.timer); }
   private emit() { this.recalculate(); this.listeners.forEach(listener => listener()); }
   private log(type: LogEvent['type'], message: string, messageId?: string) { this.state.logs.unshift({ id: id('log'), at: now(), type, message, messageId }); }
-  private animate(fromId: string, toId: string, messageId: string, label: string) { this.state.animations.push({ id: id('motion'), fromId, toId, messageId, label, startedAt: now(), duration: 850 }); }
+  private animate(fromId: string, toId: string, messageId: string, label: string, nodes = [fromId,toId]) {
+    const animation: Animation = { id:id('motion'),fromId,toId,messageId,label,nodes,startedAt:now(),duration:(nodes.length-1)*SEGMENT_DURATION };
+    this.state.animations.push(animation);
+    return animation;
+  }
   private recalculate() { for (const queue of this.state.topology.queues) queue.metrics = metrics(); for (const message of this.state.topology.messages) { const queue = this.queue(message.queueId); if (!queue) continue; if (message.state === 'available') queue.metrics.available++; if (message.state === 'delayed') queue.metrics.delayed++; if (message.state === 'in-flight') queue.metrics.inFlight++; if (message.state === 'deleted') queue.metrics.deleted++; if (message.state === 'redriven') queue.metrics.redriven++; if (message.state === 'expired') queue.metrics.expired++; if (message.state === 'deduplicated') queue.metrics.deduplicated++; } }
-  load(topology: AwsTopology) { this.state = { topology: structuredClone(topology), animations: [], logs: [] }; this.emit(); }
+  load(topology: AwsTopology) { this.waiting.clear(); this.jobs.clear(); this.nextPoll.clear(); this.state = { topology: structuredClone(topology), animations: [], logs: [] }; this.emit(); }
   queue(queueId?: string) { return this.state.topology.queues.find(item => item.id === queueId); }
   topic(topicId?: string) { return this.state.topology.topics.find(item => item.id === topicId); }
   addProducer(producer: Producer) {
@@ -21,6 +30,7 @@ export class AwsSimulationEngine {
     this.state.topology.producers.push(producer); this.emit();
   }
   addConsumer(consumer: Consumer) {
+    const error=validateWorker(consumer.worker); if(error) return this.invalid(error);
     if (!consumer.name.trim()) return this.invalid('Informe o nome do consumidor.');
     if (!this.queue(consumer.queueId)) return this.invalid('Selecione uma fila SQS existente.');
     this.state.topology.consumers.push(consumer); this.emit();
@@ -31,18 +41,153 @@ export class AwsSimulationEngine {
     if (!producer || !queue) return this.invalid('Produtor ou fila de destino não encontrado.');
     return this.enqueue(queue,body,attributes,producer.id,options);
   }
+  publishFromProducer(producerId: string, body: string, attributes: Record<string,string>, options: Partial<Pick<SimMessage,'groupId'|'deduplicationId'>> = {}) {
+    const producer = this.state.topology.producers.find(p=>p.id===producerId);
+    if(!producer) return this.invalid('Produtor não encontrado.');
+    return this.publish(producer.targetId,body,attributes,options,producer.id);
+  }
   addQueue(queue: SqsQueue) { const error = validateQueue(queue, [...this.state.topology.queues, queue]); if (error) return this.invalid(error); this.state.topology.queues.push(queue); this.emit(); }
   addTopic(topic: SnsTopic) { const error = validateTopic(topic); if (error) return this.invalid(error); this.state.topology.topics.push(topic); this.emit(); }
   addSubscription(subscription: Subscription) { const topic = this.topic(subscription.topicId); const queue = this.queue(subscription.queueId); if (!topic || !queue) return this.invalid('Tópico ou fila da assinatura não existe.'); if (!compatibleKinds(topic.queueKind, queue.queueKind)) return this.invalid('Um tópico FIFO exige fila SQS FIFO.'); this.state.topology.subscriptions.push(subscription); this.emit(); }
   private invalid(message: string) { this.log('validation', message); this.emit(); return message; }
   send(queueId: string, body: string, attributes: Record<string, string> = {}, options: Partial<Pick<SimMessage, 'groupId' | 'deduplicationId'>> = {}) { const queue = this.queue(queueId); if (!queue) return this.invalid('Fila SQS não encontrada.'); return this.enqueue(queue, body, attributes, 'direct', options); }
-  publish(topicId: string, body: string, attributes: Record<string, string> = {}, options: Partial<Pick<SimMessage, 'groupId' | 'deduplicationId'>> = {}) { const topic = this.topic(topicId); if (!topic) return this.invalid('Tópico SNS não encontrado.'); if (topic.queueKind === 'fifo' && !options.groupId) return this.invalid('Publicações FIFO exigem MessageGroupId.'); const dedup = options.deduplicationId ?? (topic.contentDeduplication ? `${body}:${JSON.stringify(attributes)}` : undefined); if (dedup && this.state.topology.messages.some(message => message.sourceId === topic.id && message.deduplicationId === dedup && now() - message.createdAt < 300000)) { this.state.topology.messages.push(this.message(topic.id, undefined, body, attributes, 'deduplicated', options.groupId, dedup)); this.log('deduplicated', 'Publicação SNS suprimida pela janela FIFO de cinco minutos.'); this.emit(); return; }
-    topic.published++; this.log('publish', `Mensagem publicada em ${topic.name}.`); const subscriptions = this.state.topology.subscriptions.filter(item => item.topicId === topicId && Object.entries(item.filter).every(([key, value]) => attributes[key] === value)); for (const subscription of subscriptions) { const queue = this.queue(subscription.queueId)!; this.enqueue(queue, body, subscription.rawDelivery ? attributes : { ...attributes, SNS: topic.name }, topic.id, { groupId: options.groupId, deduplicationId: dedup }, subscription.id); } this.emit(); }
+  publish(topicId: string, body: string, attributes: Record<string, string> = {}, options: Partial<Pick<SimMessage, 'groupId' | 'deduplicationId'>> = {}, producerId?: string) { const topic = this.topic(topicId); if (!topic) return this.invalid('Tópico SNS não encontrado.'); if (topic.queueKind === 'fifo' && !options.groupId) return this.invalid('Publicações FIFO exigem MessageGroupId.'); const dedup = options.deduplicationId ?? (topic.contentDeduplication ? `${body}:${JSON.stringify(attributes)}` : undefined); if (dedup && this.state.topology.messages.some(message => message.sourceId === topic.id && message.deduplicationId === dedup && now() - message.createdAt < 300000)) { this.state.topology.messages.push(this.message(topic.id, undefined, body, attributes, 'deduplicated', options.groupId, dedup)); this.log('deduplicated', 'Publicação SNS suprimida pela janela FIFO de cinco minutos.'); this.emit(); return; }
+    topic.published++; this.log('publish', `Mensagem publicada em ${topic.name}.`); const subscriptions = this.state.topology.subscriptions.filter(item => item.topicId === topicId && Object.entries(item.filter).every(([key, value]) => attributes[key] === value)); for (const subscription of subscriptions) { const queue = this.queue(subscription.queueId)!; this.enqueue(queue, body, subscription.rawDelivery ? attributes : { ...attributes, SNS: topic.name }, topic.id, { groupId: options.groupId, deduplicationId: dedup }, subscription.id, [...(producerId?[producerId]:[]),topic.id,subscription.id,queue.id]); } this.emit(); }
   private message(sourceId: string, queueId: string | undefined, body: string, attributes: Record<string, string>, state: SimMessage['state'], groupId?: string, deduplicationId?: string): SimMessage { const createdAt = now(); return { id: id('msg'), body, attributes, sourceId, queueId, state, createdAt, availableAt: createdAt, receivedCount: 0, groupId, deduplicationId, history: [state] }; }
-  private enqueue(queue: SqsQueue, body: string, attributes: Record<string, string>, sourceId: string, options: Partial<Pick<SimMessage, 'groupId' | 'deduplicationId'>>, fromId?: string) { if (queue.queueKind === 'fifo' && !options.groupId) return this.invalid('Envios FIFO exigem MessageGroupId.'); const message = this.message(sourceId, queue.id, body, attributes, queue.delaySeconds ? 'delayed' : 'available', options.groupId, options.deduplicationId); message.availableAt += queue.delaySeconds * 1000; queue.metrics.sent++; this.state.topology.messages.push(message); this.animate(fromId ?? sourceId, queue.id, message.id, fromId ? 'Entrega SNS' : 'SendMessage'); this.log('send', `Mensagem enviada para ${queue.name}.`, message.id); this.emit(); }
-  poll(consumerId: string) { const consumer = this.state.topology.consumers.find(item => item.id === consumerId); const queue = consumer && this.queue(consumer.queueId); if (!consumer || !queue) return this.invalid('Consumidor ou fila não encontrado.'); const candidates = this.state.topology.messages.filter(message => message.queueId === queue.id && message.state === 'available').filter(message => !message.groupId || !this.state.topology.messages.some(other => other.queueId === queue.id && other.groupId === message.groupId && other.state === 'in-flight'));
-    const message = candidates[0]; if (!message) { consumer.status = 'polling'; this.log('poll', `${consumer.name} aguarda long polling (${queue.longPollingSeconds}s).`); this.emit(); return; } consumer.status = 'busy'; message.state = 'in-flight'; message.receivedCount++; message.receiptHandle = id('receipt'); message.visibilityUntil = now() + queue.visibilityTimeout * 1000; message.history.push('in-flight'); queue.metrics.received++; this.animate(queue.id, consumer.id, message.id, 'ReceiveMessage'); this.log('poll', `${consumer.name} recebeu mensagem.`, message.id); this.emit(); }
-  deleteMessage(messageId: string) { const message = this.state.topology.messages.find(item => item.id === messageId); const queue = message && this.queue(message.queueId); if (!message || !queue || message.state !== 'in-flight') return this.invalid('Somente uma mensagem em voo pode ser excluída.'); message.state = 'deleted'; message.history.push('deleted'); const consumer = this.state.topology.consumers.find(item => item.queueId === queue.id && item.status === 'busy'); if (consumer) { consumer.status = 'idle'; consumer.processed++; } this.log('delete', 'DeleteMessage concluiu a mensagem.', message.id); this.emit(); }
+  private enqueue(queue: SqsQueue, body: string, attributes: Record<string, string>, sourceId: string, options: Partial<Pick<SimMessage, 'groupId' | 'deduplicationId'>>, fromId?: string, nodes?: string[]) {
+    if (queue.queueKind === 'fifo' && !options.groupId) return this.invalid('Envios FIFO exigem MessageGroupId.');
+    const route=nodes??(sourceId==='direct'?[queue.id]:[sourceId,queue.id]);
+    const message=this.message(sourceId,queue.id,body,attributes,'publishing',options.groupId,options.deduplicationId);
+    const animation=this.animate(fromId??sourceId,queue.id,message.id,fromId?'Entrega SNS':'SendMessage',route);
+    message.arrivesAt=animation.startedAt+animation.duration;
+    message.availableAt=message.arrivesAt+queue.delaySeconds*1000;
+    this.state.topology.messages.push(message);
+    this.log('send',`Mensagem enviada para ${queue.name}.`,message.id);
+    this.emit();
+  }
+  poll(consumerId: string) { const consumer = this.state.topology.consumers.find(item => item.id === consumerId); const queue = consumer && this.queue(consumer.queueId); if (!consumer || !queue) return this.invalid('Consumidor ou fila não encontrado.'); if(consumer.status==='busy') return this.invalid('Conclua a mensagem em processamento antes de receber outra.'); const candidates = this.state.topology.messages.filter(message => message.queueId === queue.id && message.state === 'available').filter(message => !message.groupId || !this.state.topology.messages.some(other => other.queueId === queue.id && other.groupId === message.groupId && other.state === 'in-flight'));
+    const message = candidates[0];
+    if (!message) {
+      if(this.waiting.has(consumer.id)) return;
+      consumer.status=queue.longPollingSeconds?'polling':'idle';
+      if(queue.longPollingSeconds) this.waiting.set(consumer.id,now()+queue.longPollingSeconds*1000);
+      this.log('poll',queue.longPollingSeconds?`${consumer.name} aguarda long polling (${queue.longPollingSeconds}s).`:`${consumer.name}: nenhuma mensagem disponível.`);
+      this.emit(); return;
+    }
+    this.waiting.delete(consumer.id);
+    consumer.status = 'busy'; message.consumerId=consumer.id; message.state = 'in-flight'; message.receivedCount++; message.receiptHandle = id('receipt'); message.visibilityUntil = now() + queue.visibilityTimeout * 1000; message.history.push('in-flight'); queue.metrics.received++; this.animate(queue.id, consumer.id, message.id, 'ReceiveMessage'); this.log('poll', `${consumer.name} recebeu mensagem.`, message.id);
+    const config=workerConfig(consumer.worker);
+    if(config.autoProcess) {
+      message.processingEndsAt=now()+SEGMENT_DURATION+config.processingSeconds*1000;
+      this.jobs.set(message.id,{receipt:message.receiptHandle,config});
+      this.log('worker',`${consumer.name}: processamento de ${config.processingSeconds}s após a chegada.`,message.id);
+    }
+    this.emit(); }
+  deleteMessage(messageId: string, discard=false) {
+    const message=this.state.topology.messages.find(m=>m.id===messageId);
+    if(!message||message.state!=='in-flight'||!message.consumerId) return this.invalid('Somente uma mensagem em processamento pode ser excluída.');
+    const consumer=this.state.topology.consumers.find(c=>c.id===message.consumerId);
+    message.state='deleted';message.history.push(discard?'discarded (DeleteMessage)':'deleted');
+    if(consumer) {
+      if(discard) consumer.discarded=(consumer.discarded??0)+1; else consumer.processed++;
+    }
+    this.releaseWorker(message);
+    this.state.animations=this.state.animations.filter(a=>a.messageId!==message.id);
+    this.log(discard?'discard':'delete',discard?'Descarte explícito via DeleteMessage (não contabilizado como sucesso).':'DeleteMessage concluiu a mensagem.',message.id);
+    this.emit();
+  }
+  private releaseWorker(message:SimMessage) {
+    const consumer=this.state.topology.consumers.find(c=>c.id===message.consumerId);
+    if(consumer) {
+      consumer.status='idle';
+      this.nextPoll.set(consumer.id,now()+workerConfig(consumer.worker).pollIntervalSeconds*1000);
+    }
+    this.jobs.delete(message.id);message.processingEndsAt=undefined;message.consumerId=undefined;
+  }
+  retryMessage(messageId:string,seconds?:number) {
+    const message=this.state.topology.messages.find(m=>m.id===messageId);
+    const consumer=this.state.topology.consumers.find(c=>c.id===message?.consumerId);
+    if(!message||message.state!=='in-flight'||!consumer) return this.invalid('Retry exige uma mensagem em processamento.');
+    const delay=seconds??workerConfig(consumer.worker).retryDelaySeconds;
+    if(!Number.isInteger(delay)||delay<0||delay>43200) return this.invalid('Retry deve estar entre 0 e 43200 segundos inteiros.');
+    message.visibilityUntil=now()+delay*1000;
+    message.history.push(`retry: ChangeMessageVisibility(${delay})`);
+    consumer.retries=(consumer.retries??0)+1;
+    this.releaseWorker(message);
+    this.state.animations=this.state.animations.filter(a=>a.messageId!==message.id);
+    this.log('retry',`Retry em ${delay}s via ChangeMessageVisibility; a mensagem não foi excluída.`,message.id);
+    this.emit();
+  }
+  abandonMessage(messageId:string) {
+    const message=this.state.topology.messages.find(m=>m.id===messageId);
+    if(!message||message.state!=='in-flight'||!message.consumerId) return this.invalid('A mensagem precisa estar em processamento.');
+    message.history.push('worker stopped; waiting visibility timeout');
+    this.releaseWorker(message);
+    this.log('worker','Worker parou sem excluir: a mensagem retorna após o visibility timeout.',message.id);this.emit();
+  }
   changeVisibility(messageId: string, seconds: number) { const message = this.state.topology.messages.find(item => item.id === messageId); if (!message || message.state !== 'in-flight') return this.invalid('A mensagem precisa estar em voo.'); if (seconds < 0 || seconds > 43200) return this.invalid('Visibility timeout deve estar entre 0 e 43200 segundos.'); message.visibilityUntil = now() + seconds * 1000; this.log('timeout', `Visibility timeout alterado para ${seconds}s.`, message.id); this.emit(); }
-  tick() { const time = now(); this.state.animations = this.state.animations.filter(animation => time - animation.startedAt < animation.duration); for (const message of this.state.topology.messages) { if (!message.queueId || ['deleted', 'expired', 'deduplicated'].includes(message.state)) continue; const queue = this.queue(message.queueId)!; if (message.state === 'redriven') { if (time >= message.availableAt) { message.state = 'available'; message.history.push('available'); this.log('deliver', 'Mensagem da DLQ tornou-se disponível.', message.id); } continue; } if (time - message.createdAt >= queue.retentionSeconds * 1000) { message.state = 'expired'; message.history.push('expired'); this.log('expired', `Mensagem expirou pela retenção em ${queue.name}.`, message.id); continue; } if (message.state === 'delayed' && time >= message.availableAt) { message.state = 'available'; message.history.push('available'); this.log('deliver', 'Mensagem tornou-se disponível.', message.id); } if (message.state === 'in-flight' && message.visibilityUntil && time >= message.visibilityUntil) { const consumer = this.state.topology.consumers.find(item => item.queueId === queue.id && item.status === 'busy'); if (consumer) consumer.status = 'idle'; if (queue.maxReceiveCount && message.receivedCount > queue.maxReceiveCount && queue.deadLetterQueueId) { const dlq = this.queue(queue.deadLetterQueueId)!; message.queueId = dlq.id; message.state = 'redriven'; message.availableAt = time + 850; message.history.push('redriven'); this.animate(queue.id, dlq.id, message.id, 'Redrive DLQ'); this.log('redrive', `Mensagem redirecionada para ${dlq.name}.`, message.id); } else { message.state = 'available'; message.history.push('available'); this.log('timeout', 'Visibility timeout expirou; mensagem disponível novamente.', message.id); } } } this.emit(); }
+  tick() {
+    const time=now();
+    this.state.animations=this.state.animations.filter(a=>time-a.startedAt<a.duration);
+    for(const message of this.state.topology.messages) {
+      if(!message.queueId||['deleted','expired','deduplicated'].includes(message.state)) continue;
+      const queue=this.queue(message.queueId);
+      if(!queue) continue;
+      if(message.state==='publishing') {
+        if(time<(message.arrivesAt??message.availableAt)) continue;
+        message.state=time<message.availableAt?'delayed':'available';
+        message.history.push(message.state);
+        this.log('deliver',`Mensagem chegou a ${queue.name}.`,message.id);
+      }
+      if(time-(message.arrivesAt??message.createdAt)>=queue.retentionSeconds*1000) {
+        message.state='expired'; message.history.push('expired');
+        this.releaseWorker(message);
+        this.log('expired',`Mensagem expirou pela retenção em ${queue.name}.`,message.id);
+        continue;
+      }
+      if(['delayed','redriven'].includes(message.state)&&time>=message.availableAt) {
+        message.state='available'; message.history.push('available');
+        this.log('deliver','Mensagem tornou-se disponível.',message.id);
+      }
+      if(message.state==='in-flight'&&message.visibilityUntil!==undefined&&time>=message.visibilityUntil) {
+        this.releaseWorker(message);
+        message.receiptHandle=undefined;
+        this.state.animations=this.state.animations.filter(a=>a.messageId!==message.id);
+        if(queue.maxReceiveCount&&message.receivedCount>queue.maxReceiveCount&&queue.deadLetterQueueId) {
+          const dlq=this.queue(queue.deadLetterQueueId)!;
+          message.queueId=dlq.id; message.state='redriven';
+          message.availableAt=time+SEGMENT_DURATION; message.history.push('redriven');
+          this.animate(queue.id,dlq.id,message.id,'Redrive DLQ');
+          this.log('redrive',`Mensagem redirecionada para ${dlq.name}.`,message.id);
+        } else {
+          message.state='available'; message.history.push('available');
+          this.log('timeout','Visibility timeout expirou; mensagem disponível novamente.',message.id);
+        }
+      }
+    }
+    for(const [messageId,job] of this.jobs) {
+      const message=this.state.topology.messages.find(m=>m.id===messageId);
+      if(!message||message.state!=='in-flight'||message.receiptHandle!==job.receipt) {this.jobs.delete(messageId);continue;}
+      if(time<(message.processingEndsAt??Infinity)) continue;
+      if(job.config.outcome==='success') this.deleteMessage(messageId);
+      else if(job.config.failureAction==='discard') this.deleteMessage(messageId,true);
+      else if(job.config.failureAction==='retry') this.retryMessage(messageId,job.config.retryDelaySeconds);
+      else this.abandonMessage(messageId);
+    }
+    for(const [consumerId,deadline] of this.waiting) {
+      const consumer=this.state.topology.consumers.find(c=>c.id===consumerId);
+      if(!consumer||time>=deadline) {
+        this.waiting.delete(consumerId);
+        if(consumer) {consumer.status='idle';this.log('poll',`${consumer.name}: long polling terminou.`);}
+      } else this.poll(consumerId);
+    }
+    for(const consumer of this.state.topology.consumers) {
+      const config=workerConfig(consumer.worker);
+      if(config.autoPoll&&consumer.status==='idle'&&time>=(this.nextPoll.get(consumer.id)??0)) {
+        this.nextPoll.set(consumer.id,time+config.pollIntervalSeconds*1000);
+        this.poll(consumer.id);
+      }
+    }
+    this.emit();
+  }
 }
