@@ -1,6 +1,7 @@
 import type { AwsTopology, Producer, Consumer, SnsTopic, SqsQueue, Subscription } from '../domain/types';
 import { validateQueue, validateTopic, compatibleKinds } from '../domain/validation';
 import { workerConfig, validateWorker } from '../domain/worker';
+import { workerStatus } from './worker-status';
 export type Resource = Producer | Consumer | SnsTopic | SqsQueue | Subscription;
 export const escapeHtml = (v: unknown) => String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export const allResources = (t: AwsTopology): Resource[] => [...t.producers,...t.topics,...t.queues,...t.subscriptions,...t.consumers];
@@ -19,17 +20,17 @@ export function details(r: Resource, t: AwsTopology) {
     content=stat('Disponíveis',r.metrics.available)+stat('Em voo',r.metrics.inFlight)+stat('Atrasadas',r.metrics.delayed)+
       `<div class="queue-preview">${messages.length?messages.slice(0,4).map(m=>`<i title="${escapeHtml(m.state)}">${escapeHtml(m.id.slice(-4))}</i>`).join(''):'FILA VAZIA'}</div>`+
       stat('Visibilidade',`${r.visibilityTimeout}s`)+stat('Delay',`${r.delaySeconds}s`)+stat('Retenção',`${r.retentionSeconds}s`)+stat('DLQ',name(r.deadLetterQueueId));
+    const waiting=t.messages.filter(m=>m.queueId===r.id&&m.state==='in-flight'&&m.retryArrivesAt!==undefined&&Date.now()>=m.retryArrivesAt);
+    if(waiting.length) content+=`<div class="retry-waiting"><i class="worker-message-dot"></i><span>${waiting.length} aguardando retry (invisível)</span></div>`;
   }
   if(r.kind==='consumer') {
     const config=workerConfig(r.worker);
-    const message=t.messages.find(m=>m.consumerId===r.id&&m.state==='in-flight');
     content=stat('Status',({idle:'Ocioso',polling:'Aguardando polling',busy:'Processando'})[r.status])+
       stat('Modo',config.autoProcess?'Automático':'Manual')+stat('Processamento',`${config.processingSeconds}s`)+
-      (message?.processingEndsAt?stat('Restante',`${Math.max(0,Math.ceil((message.processingEndsAt-Date.now())/1000))}s`):'')+
       stat('Sucessos',r.processed)+stat('Descartadas',r.discarded??0)+stat('Retries',r.retries??0)+stat('Fila',name(r.queueId));
   }
   if(r.kind==='subscription') content=stat('SNS',name(r.topicId))+stat('SQS',name(r.queueId))+stat('Entrega',r.rawDelivery?'Bruta':'Envelope')+stat('Filtro',Object.keys(r.filter).length?JSON.stringify(r.filter):'Todas as mensagens');
-  return `<div class="card-stats">${content}</div>`;
+  return `${r.kind==='consumer'?`<div class="worker-visual">${workerStatus(r,t)}</div>`:''}<div class="card-stats">${content}</div>`;
 }
 
 // Validate a detached candidate, including resources that reference it, before committing.
@@ -85,7 +86,7 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
     const config=workerConfig(r.worker);
     fields+=select('Fila SQS','queueId',r.queueId,t.queues)+
       check('Processar automaticamente após receber','autoProcess',config.autoProcess)+
-      input('Tempo de processamento (segundos)','processingSeconds',config.processingSeconds,'number',0,43200)+
+      input('Tempo de processamento automático (segundos)','processingSeconds',config.processingSeconds,'number',0,43200)+
       select('Resultado simulado','outcome',config.outcome,[{id:'success',name:'Sucesso — DeleteMessage'},{id:'failure',name:'Falha — aplicar política abaixo'}])+
       select('Ao falhar','failureAction',config.failureAction,[{id:'retry',name:'Retry — devolver após espera'},{id:'discard',name:'Descartar — DeleteMessage, sem retry'},{id:'wait',name:'Parar — aguardar visibility timeout'}])+
       input('Espera para retry (segundos)','retryDelaySeconds',config.retryDelaySeconds,'number',0,43200)+

@@ -1,4 +1,5 @@
 import type { AwsTopology } from '../domain/types';
+import { workerConfig } from '../domain/worker';
 
 export function connectionInfo(t: AwsTopology) {
   const attrs=(values:Record<string,string>)=>Object.entries(values).map(([k,v])=>`${k}=${v}`).join(' · ')||'sem atributos';
@@ -10,6 +11,8 @@ export function connectionInfo(t: AwsTopology) {
       {from:s.id,to:s.queueId,label:s.rawDelivery?'Raw delivery · MessageAttributes':'Envelope SNS · MessageAttributes'},
     ]),
     ...t.consumers.map(c=>({from:c.queueId,to:c.id,label:'ReceiveMessage · atributos + receipt handle'})),
+    ...t.consumers.filter(c=>{const w=workerConfig(c.worker);return w.outcome==='failure'&&w.failureAction==='retry';})
+      .map(c=>({from:c.id,to:c.queueId,label:`Retry → SQS · ChangeMessageVisibility · espera ${workerConfig(c.worker).retryDelaySeconds}s`})),
     ...t.queues.filter(q=>q.deadLetterQueueId).map(q=>({from:q.id,to:q.deadLetterQueueId!,label:`Redrive · maxReceiveCount=${q.maxReceiveCount}`})),
   ];
 }

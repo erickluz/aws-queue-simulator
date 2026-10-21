@@ -10,6 +10,7 @@ import { openResourceDialog } from './ui/resource-editor';
 import { connectionCurve, curvePath, curvePoint } from './ui/flow';
 import { connectionInfo } from './ui/connections';
 import { placeLabel, type Box } from './ui/connection-layout';
+import { workerStatus } from './ui/worker-status';
 import { createPreset } from './ui/presets';
 import { AwsSimulationEngine, emptyTopology } from './core/engine';
 import { SEGMENT_DURATION } from './core/delivery';
@@ -111,6 +112,12 @@ function edgeCurve(from:string,to:string) {
   const elements=Array.from(app.querySelectorAll<HTMLElement>('.node'));
   const ae=elements.find(e=>e.dataset.id===from),be=elements.find(e=>e.dataset.id===to);
   if(!a||!b||!ae||!be||from===to) return;
+  if(a.kind==='consumer'&&b.kind==='queue') {
+    const start={x:a.position.x+ae.offsetWidth/2,y:a.position.y+ae.offsetHeight};
+    const end={x:b.position.x+be.offsetWidth/2,y:b.position.y+be.offsetHeight};
+    const bottom=Math.max(start.y,end.y)+160;
+    return {from:start,to:end,c1:{x:start.x,y:bottom},c2:{x:end.x,y:bottom}};
+  }
   if(a.position.x===b.position.x) return connectionCurve(
     {x:a.position.x+ae.offsetWidth/2,y:a.position.y+ae.offsetHeight},
     {x:b.position.x+be.offsetWidth/2,y:b.position.y});
@@ -119,10 +126,15 @@ function edgeCurve(from:string,to:string) {
 function updateConnections() {
   const svg=app.querySelector('svg'); if(!svg) return;
   const obstacles:Box[]=Array.from(app.querySelectorAll<HTMLElement>('.node')).map(n=>({x:n.offsetLeft,y:n.offsetTop,width:n.offsetWidth,height:n.offsetHeight}));
-  svg.innerHTML=connectionInfo(engine.state.topology).map(e=>{
+  const edges=connectionInfo(engine.state.topology);
+  // Manual retries and edits during a return still retain a visible return path.
+  for(const a of engine.state.animations) if(a.label.startsWith('Retry')&&!edges.some(e=>e.from===a.fromId&&e.to===a.toId)) {
+    edges.push({from:a.fromId,to:a.toId,label:'Retry → SQS · ChangeMessageVisibility'});
+  }
+  svg.innerHTML='<defs><marker id="retry-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><polygon points="0,0 10,5 0,10" fill="#fb7185"/></marker></defs>'+edges.map(e=>{
     const curve=edgeCurve(e.from,e.to); if(!curve) return '';
     const mid=curvePoint(curve,.5), words=e.label.split(' · ');
-    return `<g class="flow-connection"><title>${esc(e.label)}</title><path d="${curvePath(curve)}"/>
+    return `<g class="flow-connection ${e.label.startsWith('Retry')?'retry-connection':''}"><title>${esc(e.label)}</title><path class="connection-path" d="${curvePath(curve)}" ${e.label.startsWith('Retry')?'marker-end="url(#retry-arrow)"':''}/>
       <path class="label-leader"/><g class="connection-box" data-anchor-x="${mid.x}" data-anchor-y="${mid.y}"><rect rx="9"/>
       <text class="connection-label" x="12" y="23">
       ${words.flatMap(w=>w.match(/.{1,32}/gu)??['']).map((w,i)=>`<tspan x="12" dy="${i?18:0}">${esc(w)}</tspan>`).join('')}</text></g></g>`;
@@ -138,6 +150,13 @@ function updateConnections() {
 }
 function animateFlow() {
   const layer=app.querySelector('.flow-particles'),time=Date.now();
+  app.querySelectorAll<HTMLElement>('.node:has(.worker-visual)').forEach(node=>{
+    const consumer=engine.state.topology.consumers.find(c=>c.id===node.dataset.id);
+    if(!consumer) return;
+    const host=node.querySelector<HTMLElement>('.worker-visual')!;
+    const html=workerStatus(consumer,engine.state.topology,time);
+    if(host.dataset.rendered!==html) {host.innerHTML=html;host.dataset.rendered=html;}
+  });
   const dots=engine.state.animations.flatMap(a=>{
     const elapsed=time-a.startedAt;
     if(elapsed<0||elapsed>=a.duration||a.nodes.length<2) return [];
@@ -177,8 +196,8 @@ function drag(el:HTMLElement) {
 }
 function refresh() {
   if(dragging||app.querySelector('dialog[open]')) return;
-  const clock=engine.state.topology.messages.some(m=>m.processingEndsAt)?Math.floor(Date.now()/1000):0;
-  const key=JSON.stringify([engine.state.topology,engine.state.logs,selectedId,logFilter,clock]);
+  const clock=engine.state.topology.messages.some(m=>m.processingStartedAt||m.retryArrivesAt)?Math.floor(Date.now()/1000):0;
+  const key=JSON.stringify([engine.state.topology,engine.state.logs,engine.state.animations.map(a=>a.id),selectedId,logFilter,clock]);
   if(key===renderedKey) return;
   const focused=app.querySelector('input:focus,select:focus,textarea:focus');
   // The editor survives renders, including unfinished edits and focus.

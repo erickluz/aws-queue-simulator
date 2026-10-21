@@ -103,8 +103,9 @@ export class AwsSimulationEngine {
     this.waiting.delete(consumer.id);
     consumer.status = 'busy'; message.consumerId=consumer.id; message.state = 'in-flight'; message.receivedCount++; message.receiptHandle = id('receipt'); message.visibilityUntil = now() + queue.visibilityTimeout * 1000; message.history.push('in-flight'); queue.metrics.received++; this.animate(queue.id, consumer.id, message.id, 'ReceiveMessage'); this.log('poll', `${consumer.name} recebeu mensagem.`, message.id);
     const config=workerConfig(consumer.worker);
+    message.processingStartedAt=now()+SEGMENT_DURATION;
     if(config.autoProcess) {
-      message.processingEndsAt=now()+SEGMENT_DURATION+config.processingSeconds*1000;
+      message.processingEndsAt=message.processingStartedAt+config.processingSeconds*1000;
       this.jobs.set(message.id,{receipt:message.receiptHandle,config});
       this.log('worker',`${consumer.name}: processamento de ${config.processingSeconds}s após a chegada.`,message.id);
     }
@@ -128,7 +129,7 @@ export class AwsSimulationEngine {
       consumer.status='idle';
       this.nextPoll.set(consumer.id,now()+workerConfig(consumer.worker).pollIntervalSeconds*1000);
     }
-    this.jobs.delete(message.id);message.processingEndsAt=undefined;message.consumerId=undefined;
+    this.jobs.delete(message.id);message.processingStartedAt=undefined;message.processingEndsAt=undefined;message.consumerId=undefined;
   }
   retryMessage(messageId:string,seconds?:number) {
     const message=this.state.topology.messages.find(m=>m.id===messageId);
@@ -141,6 +142,8 @@ export class AwsSimulationEngine {
     consumer.retries=(consumer.retries??0)+1;
     this.releaseWorker(message);
     this.state.animations=this.state.animations.filter(a=>a.messageId!==message.id);
+    const returning=this.animate(consumer.id,message.queueId!,message.id,'Retry — ChangeMessageVisibility');
+    message.retryArrivesAt=returning.startedAt+returning.duration;
     this.log('retry',`Retry em ${delay}s via ChangeMessageVisibility; a mensagem não foi excluída.`,message.id);
     this.emit();
   }
@@ -175,7 +178,8 @@ export class AwsSimulationEngine {
         message.state='available'; message.history.push('available');
         this.log('deliver','Mensagem tornou-se disponível.',message.id);
       }
-      if(message.state==='in-flight'&&message.visibilityUntil!==undefined&&time>=message.visibilityUntil) {
+      if(message.state==='in-flight'&&message.visibilityUntil!==undefined&&time>=Math.max(message.visibilityUntil,message.retryArrivesAt??0)) {
+        message.retryArrivesAt=undefined;
         this.releaseWorker(message);
         message.receiptHandle=undefined;
         this.state.animations=this.state.animations.filter(a=>a.messageId!==message.id);

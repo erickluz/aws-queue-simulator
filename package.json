@@ -11,6 +11,7 @@
     "verify:delivery": "node scripts/verify-engine.mjs src/verify-delivery.ts",
     "verify:flow": "node scripts/verify-flow.mjs",
     "verify:canvas-actions": "node scripts/verify-engine.mjs src/verify-canvas-actions.ts",
+    "verify:worker-visual": "node scripts/verify-engine.mjs src/verify-worker-visual.ts",
     "verify:worker-canvas": "node scripts/verify-engine.mjs src/verify-worker-canvas.ts"
   },
   "devDependencies": {
