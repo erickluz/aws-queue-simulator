@@ -27,6 +27,7 @@ export function details(r: Resource, t: AwsTopology) {
     const config=workerConfig(r.worker);
     content=stat('Status',({idle:'Ocioso',polling:'Aguardando polling',busy:'Processando'})[r.status])+
       stat('Modo',config.autoProcess?'Automático':'Manual')+stat('Processamento',`${config.processingSeconds}s`)+
+      stat('Mensagens por poll',config.batchSize)+stat('Concorrência máxima',config.concurrency)+
       stat('Sucessos',r.processed)+stat('Descartadas',r.discarded??0)+stat('Retries',r.retries??0)+stat('Fila',name(r.queueId));
   }
   if(r.kind==='subscription') content=stat('SNS',name(r.topicId))+stat('SQS',name(r.queueId))+stat('Entrega',r.rawDelivery?'Bruta':'Envelope')+stat('Filtro',Object.keys(r.filter).length?JSON.stringify(r.filter):'Todas as mensagens');
@@ -86,13 +87,15 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
     const config=workerConfig(r.worker);
     fields+=select('Fila SQS','queueId',r.queueId,t.queues)+
       check('Consumir e processar automaticamente','autoProcess',config.autoProcess)+
+      input('Mensagens por polling (1–10)','batchSize',config.batchSize,'number',1,10)+
+      input('Processamentos simultâneos (1–100)','concurrency',config.concurrency,'number',1,100)+
       input('Tempo de processamento automático (segundos)','processingSeconds',config.processingSeconds,'number',0,43200)+
       select('Resultado simulado','outcome',config.outcome,[{id:'success',name:'Sucesso — DeleteMessage'},{id:'failure',name:'Falha — aplicar política abaixo'}])+
       select('Ao falhar','failureAction',config.failureAction,[{id:'retry',name:'Retry — devolver após espera'},{id:'discard',name:'Descartar — DeleteMessage, sem retry'},{id:'wait',name:'Parar — aguardar visibility timeout'}])+
       input('Espera para retry (segundos)','retryDelaySeconds',config.retryDelaySeconds,'number',0,43200)+
       check('Buscar mensagens também no modo manual','autoPoll',config.autoPoll)+
       input('Intervalo entre polls (segundos)','pollIntervalSeconds',config.pollIntervalSeconds,'number',1,300)+
-      '<p>O modo automático busca e processa uma mensagem por vez. O intervalo vale após concluir uma tentativa ou uma busca sem mensagens; ao editar, o próximo poll usa o novo valor. A busca no modo manual recebe a mensagem e aguarda sua ação.</p><p>Configurações de processamento valem para a próxima recepção. O tempo começa após a chegada visual. Se a visibilidade expirar antes, a mensagem volta à fila; descarte é irreversível nesta simulação. Retry preserva a política de DLQ da fila.</p>';
+      '<p>O lote define quantas mensagens cada poll pode receber. A concorrência limita quantas processam juntas; o restante aguarda no consumidor, já sob visibility timeout. Novos polls respeitam o intervalo e a capacidade livre, com buffer limitado ao maior valor entre lote e concorrência. No modo manual, as mensagens aguardam sua ação.</p><p>O tempo de processamento começa após a chegada e a liberação de uma vaga. FIFO processa um item por grupo de cada vez. Reduzir a concorrência não interrompe tentativas já iniciadas. As configurações de resultado e duração valem para o próximo lote recebido.</p>';
   }
   if(r.kind==='subscription') fields+=select('Tópico SNS','topicId',r.topicId,t.topics)+select('Fila SQS','queueId',r.queueId,t.queues)+check('Entrega bruta','rawDelivery',r.rawDelivery)+`<label>Filtro de atributos (JSON)<textarea name="filter" rows="4">${escapeHtml(JSON.stringify(r.filter,null,2))}</textarea></label>`;
   host.dataset.editorId=r.id;
@@ -110,9 +113,10 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
     try {
       if(r.kind==='consumer') {
         values.worker={autoProcess:data.has('autoProcess'),autoPoll:data.has('autoPoll'),
+          batchSize:Number(values.batchSize),concurrency:Number(values.concurrency),
           processingSeconds:Number(values.processingSeconds),retryDelaySeconds:Number(values.retryDelaySeconds),
           pollIntervalSeconds:Number(values.pollIntervalSeconds),outcome:values.outcome,failureAction:values.failureAction};
-        for(const key of ['autoProcess','autoPoll','processingSeconds','retryDelaySeconds','pollIntervalSeconds','outcome','failureAction']) delete values[key];
+        for(const key of ['autoProcess','autoPoll','processingSeconds','retryDelaySeconds','pollIntervalSeconds','outcome','failureAction','batchSize','concurrency']) delete values[key];
       }
       if(r.kind==='producer') {
         const attributes:unknown=JSON.parse(String(values.messageAttributes));

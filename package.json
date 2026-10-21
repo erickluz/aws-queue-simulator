@@ -13,6 +13,7 @@
     "verify:canvas-actions": "node scripts/verify-engine.mjs src/verify-canvas-actions.ts",
     "verify:worker-visual": "node scripts/verify-engine.mjs src/verify-worker-visual.ts",
     "verify:auto-poll": "node scripts/verify-engine.mjs src/verify-auto-poll.ts",
+    "verify:batch": "node scripts/verify-engine.mjs src/verify-batch.ts",
     "verify:worker-canvas": "node scripts/verify-engine.mjs src/verify-worker-canvas.ts"
   },
   "devDependencies": {

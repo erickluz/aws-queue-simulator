@@ -22,7 +22,7 @@ try {
   const message=engine.state.topology.messages[0];
   assert(message.state==='in-flight'&&!message.consumerId,'Excluir consumidor preserva mensagem até timeout');
   time+=31_000;engine.tick();assert(engine.state.topology.messages[0].state==='available','Timeout após excluir consumidor');
-  const preset=createPreset();preset.consumers[0].worker={autoProcess:true,processingSeconds:2,outcome:'success',failureAction:'retry',retryDelaySeconds:0,autoPoll:true,pollIntervalSeconds:1};
+  const preset=createPreset();preset.consumers[0].worker={autoProcess:true,processingSeconds:2,outcome:'success',failureAction:'retry',retryDelaySeconds:0,autoPoll:true,pollIntervalSeconds:1,batchSize:1,concurrency:1};
   engine.load(preset);engine.send('queue-orders','test');engine.tick();
   engine.removeResource('consumer-worker');time+=4_000;engine.tick();
   assert(engine.state.topology.messages[0].state==='in-flight','Excluir worker cancela conclusão automática');

@@ -52,10 +52,10 @@ function render() {
       ${'queueKind' in r?`<em>${r.queueKind.toUpperCase()}</em>`:''}${details(r,t)}</article>`).join('')}
     </div></div></section><aside>
     <section id="resource-actions"></section>
-    <section><h2>Mensagens em processamento</h2><p>ReceiveMessage retira da área disponível. Somente DeleteMessage conclui o processamento; timeout permite reentrega.</p>
+    <section><h2>Mensagens recebidas</h2><p>ReceiveMessage retira da área disponível. Mensagens aguardando vaga também estão sob visibility timeout.</p>
     ${t.messages.filter(m=>m.state==='in-flight').map(m=>`<div class="message"><b>${esc(m.id)}</b><small>Receipt: ${esc(m.receiptHandle)}</small>
       <p>MessageAttributes: ${esc(JSON.stringify(m.attributes))}<br>ApproximateReceiveCount: ${m.receivedCount}</p>
-      ${m.consumerId?`${button('Concluir — DeleteMessage',`delete:${m.id}`)} ${button('Retry',`retry:${m.id}`)} ${button('Descartar',`discard:${m.id}`)} ${button('Aguardar timeout',`abandon:${m.id}`)} ${button('Visibility +30s',`visibility:${m.id}`)}`:'<p>Aguardando reentrega após visibilidade.</p>'}</div>`).join('')||'<p>Nenhuma mensagem em voo.</p>'}</section>
+      ${m.consumerId?`${m.processingStartedAt===undefined?'<p>Aguardando vaga / grupo FIFO.</p>':button('Concluir — DeleteMessage',`delete:${m.id}`)} ${button('Retry',`retry:${m.id}`)} ${button('Descartar',`discard:${m.id}`)} ${button('Aguardar timeout',`abandon:${m.id}`)} ${button('Visibility +30s',`visibility:${m.id}`)}`:'<p>Aguardando reentrega após visibilidade.</p>'}</div>`).join('')||'<p>Nenhuma mensagem em voo.</p>'}</section>
     <section><h2>Eventos</h2><select id="filter"><option value="all">Todos</option><option value="timeout">Timeout</option><option value="redrive">Redrive</option><option value="deduplicated">Deduplicação</option><option value="worker">Worker</option><option value="retry">Retry</option><option value="discard">Descarte</option></select><ol>
     ${engine.state.logs.filter(l=>logFilter==='all'||l.type===logFilter).slice(0,12).map(l=>`<li><b>${l.type}</b> ${esc(l.message)}</li>`).join('')}</ol></section>
     <section><h2>Presets</h2>${button('SNS fan-out','preset:fanout')}${button('Filtro de atributo','preset:filter')}${button('FIFO/deduplicação','preset:fifo')}${button('Retry e DLQ','preset:retry')}</section>
@@ -155,14 +155,21 @@ function animateFlow() {
     if(!consumer) return;
     const host=node.querySelector<HTMLElement>('.worker-visual')!;
     const html=workerStatus(consumer,engine.state.topology,time);
-    if(host.dataset.rendered!==html) {host.innerHTML=html;host.dataset.rendered=html;}
+    if(host.dataset.rendered!==html) {
+      const scroll=host.querySelector('.worker-message-list')?.scrollTop??0;
+      host.innerHTML=html;host.dataset.rendered=html;
+      host.querySelector('.worker-message-list')?.scrollTo({top:scroll});
+    }
   });
   const dots=engine.state.animations.flatMap(a=>{
     const elapsed=time-a.startedAt;
     if(elapsed<0||elapsed>=a.duration||a.nodes.length<2) return [];
     const segment=Math.floor(elapsed/SEGMENT_DURATION);
     const curve=edgeCurve(a.nodes[segment],a.nodes[segment+1]); if(!curve) return [];
-    const p=curvePoint(curve,(elapsed%SEGMENT_DURATION)/SEGMENT_DURATION);
+    const siblings=engine.state.animations.filter(other=>other.fromId===a.fromId&&other.toId===a.toId&&other.startedAt===a.startedAt);
+    const progress=(elapsed%SEGMENT_DURATION)/SEGMENT_DURATION;
+    const separation=siblings.length>1?(siblings.indexOf(a)/(siblings.length-1)-.5)*.35*Math.sin(Math.PI*progress):0;
+    const p=curvePoint(curve,progress+separation);
     return [`<circle class="flow-dot-halo" cx="${p.x}" cy="${p.y}" r="12"/><circle class="flow-dot" cx="${p.x}" cy="${p.y}" r="5"/>`];
   });
   if(layer) layer.innerHTML=dots.join('');
@@ -224,7 +231,7 @@ function refresh() {
     selected.kind==='producer'?button(engine.queue(selected.targetId)?'Enviar SQS':'Publicar SNS',`publish:${selected.id}`):
     selected.kind==='consumer'?button('Receber mensagem (polling)',`poll:${selected.id}`):
     '<p>Edite as propriedades acima.</p>'}${button('Excluir card',`remove:${selected.id}`)}`:'<h2>Inspector</h2><p>Clique em um card para editar e acessar suas ações. Arraste para reposicionar.</p>';
-  if(selected?.kind==='consumer'&&selected.status==='busy') actions.querySelector('button')!.disabled=true;
+  if(selected?.kind==='consumer'&&!engine.canPoll(selected.id)) actions.querySelector('button')!.disabled=true;
   app.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action!));
   app.querySelector<HTMLInputElement>('#import')!.onchange=async e=>{
     const file=(e.target as HTMLInputElement).files?.[0];if(!file) return;

@@ -13,7 +13,33 @@ export class AwsSimulationEngine {
   state: SimulationState = { topology: emptyTopology(), animations: [], logs: [] }; private listeners = new Set<() => void>(); private timer = globalThis.setInterval(() => this.tick(), 500);
   subscribe(listener: () => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   destroy() { clearInterval(this.timer); }
-  private emit() { this.recalculate(); this.listeners.forEach(listener => listener()); }
+  private emit() { this.scheduleWorkers(); this.recalculate(); this.listeners.forEach(listener => listener()); }
+  private owned(consumerId:string) { return this.state.topology.messages.filter(m=>m.consumerId===consumerId&&m.state==='in-flight'); }
+  canPoll(consumerId:string) {
+    const consumer=this.state.topology.consumers.find(c=>c.id===consumerId);
+    return !!consumer&&this.owned(consumerId).length<workerConfig(consumer.worker).concurrency;
+  }
+  private scheduleWorkers() {
+    for(const consumer of this.state.topology.consumers) {
+      const messages=this.owned(consumer.id), config=workerConfig(consumer.worker);
+      let active=messages.filter(m=>m.processingStartedAt!==undefined).length;
+      for(const message of messages) {
+        if(active>=config.concurrency) break;
+        if(message.processingStartedAt!==undefined) continue;
+        const job=this.jobs.get(message.id);if(!job) continue;
+        // A failed earlier FIFO message blocks the remainder of its group, including local buffers.
+        if(this.queue(message.queueId)?.queueKind==='fifo'&&message.groupId) {
+          const earlier=this.state.topology.messages.slice(0,this.state.topology.messages.indexOf(message));
+          if(earlier.some(m=>m.queueId===message.queueId&&m.groupId===message.groupId&&!['deleted','expired','deduplicated'].includes(m.state))) continue;
+        }
+        if(message.visibilityUntil!==undefined&&message.visibilityUntil<=now()) continue;
+        message.processingStartedAt=Math.max(now(),message.consumerArrivesAt??now());
+        if(job.config.autoProcess) message.processingEndsAt=message.processingStartedAt+job.config.processingSeconds*1000;
+        active++;
+      }
+      consumer.status=messages.length?'busy':this.waiting.has(consumer.id)?'polling':'idle';
+    }
+  }
   private log(type: LogEvent['type'], message: string, messageId?: string) { this.state.logs.unshift({ id: id('log'), at: now(), type, message, messageId }); }
   private animate(fromId: string, toId: string, messageId: string, label: string, nodes = [fromId,toId]) {
     const animation: Animation = { id:id('motion'),fromId,toId,messageId,label,nodes,startedAt:now(),duration:(nodes.length-1)*SEGMENT_DURATION };
@@ -91,9 +117,16 @@ export class AwsSimulationEngine {
     this.log('send',`Mensagem enviada para ${queue.name}.`,message.id);
     this.emit();
   }
-  poll(consumerId: string) { const consumer = this.state.topology.consumers.find(item => item.id === consumerId); const queue = consumer && this.queue(consumer.queueId); if (!consumer || !queue) return this.invalid('Consumidor ou fila não encontrado.'); if(consumer.status==='busy') return this.invalid('Conclua a mensagem em processamento antes de receber outra.'); const candidates = this.state.topology.messages.filter(message => message.queueId === queue.id && message.state === 'available').filter(message => !message.groupId || !this.state.topology.messages.some(other => other.queueId === queue.id && other.groupId === message.groupId && other.state === 'in-flight'));
-    const message = candidates[0];
-    if (!message) {
+  poll(consumerId: string) {
+    const consumer=this.state.topology.consumers.find(c=>c.id===consumerId),queue=consumer&&this.queue(consumer.queueId);
+    if(!consumer||!queue) return this.invalid('Consumidor ou fila não encontrado.');
+    if(!this.canPoll(consumerId)) return this.invalid('Aguarde uma vaga no consumidor antes de receber outro lote.');
+    const config=workerConfig(consumer.worker);
+    const capacity=Math.max(config.batchSize,config.concurrency)-this.owned(consumerId).length;
+    const candidates=this.state.topology.messages.filter(m=>m.queueId===queue.id&&m.state==='available')
+      .filter(m=>queue.queueKind!=='fifo'||!m.groupId||!this.state.topology.messages.some(other=>other.queueId===queue.id&&other.groupId===m.groupId&&other.state==='in-flight'))
+      .slice(0,Math.min(config.batchSize,capacity));
+    if (!candidates.length) {
       if(this.waiting.has(consumer.id)) return;
       consumer.status=queue.longPollingSeconds?'polling':'idle';
       if(queue.longPollingSeconds) this.waiting.set(consumer.id,now()+queue.longPollingSeconds*1000);
@@ -101,18 +134,20 @@ export class AwsSimulationEngine {
       this.emit(); return;
     }
     this.waiting.delete(consumer.id);
-    consumer.status = 'busy'; message.consumerId=consumer.id; message.state = 'in-flight'; message.receivedCount++; message.receiptHandle = id('receipt'); message.visibilityUntil = now() + queue.visibilityTimeout * 1000; message.history.push('in-flight'); queue.metrics.received++; this.animate(queue.id, consumer.id, message.id, 'ReceiveMessage'); this.log('poll', `${consumer.name} recebeu mensagem.`, message.id);
-    const config=workerConfig(consumer.worker);
-    message.processingStartedAt=now()+SEGMENT_DURATION;
-    if(config.autoProcess) {
-      message.processingEndsAt=message.processingStartedAt+config.processingSeconds*1000;
+    this.lastPollAt.set(consumer.id,now());
+    for(const message of candidates) {
+      message.consumerId=consumer.id;message.state='in-flight';message.receivedCount++;
+      message.receiptHandle=id('receipt');message.visibilityUntil=now()+queue.visibilityTimeout*1000;
+      message.consumerArrivesAt=now()+SEGMENT_DURATION;message.history.push('in-flight');
+      this.animate(queue.id,consumer.id,message.id,'ReceiveMessage');
       this.jobs.set(message.id,{receipt:message.receiptHandle,config});
-      this.log('worker',`${consumer.name}: processamento de ${config.processingSeconds}s após a chegada.`,message.id);
     }
+    this.log('poll',`${consumer.name} recebeu ${candidates.length} mensagem(ns); concorrência ${config.concurrency}.`);
     this.emit(); }
   deleteMessage(messageId: string, discard=false) {
     const message=this.state.topology.messages.find(m=>m.id===messageId);
     if(!message||message.state!=='in-flight'||!message.consumerId) return this.invalid('Somente uma mensagem em processamento pode ser excluída.');
+    if(!discard&&message.processingStartedAt===undefined) return this.invalid('Aguarde uma vaga de processamento antes de concluir esta mensagem.');
     const consumer=this.state.topology.consumers.find(c=>c.id===message.consumerId);
     message.state='deleted';message.history.push(discard?'discarded (DeleteMessage)':'deleted');
     if(consumer) {
@@ -125,11 +160,11 @@ export class AwsSimulationEngine {
   }
   private releaseWorker(message:SimMessage) {
     const consumer=this.state.topology.consumers.find(c=>c.id===message.consumerId);
+    this.jobs.delete(message.id);message.consumerArrivesAt=undefined;message.processingStartedAt=undefined;message.processingEndsAt=undefined;message.consumerId=undefined;
     if(consumer) {
-      consumer.status='idle';
-      this.lastPollAt.set(consumer.id,now());
+      consumer.status=this.owned(consumer.id).length?'busy':'idle';
+      if(consumer.status==='idle') this.lastPollAt.set(consumer.id,now());
     }
-    this.jobs.delete(message.id);message.processingStartedAt=undefined;message.processingEndsAt=undefined;message.consumerId=undefined;
   }
   retryMessage(messageId:string,seconds?:number) {
     const message=this.state.topology.messages.find(m=>m.id===messageId);
@@ -195,6 +230,7 @@ export class AwsSimulationEngine {
         }
       }
     }
+    this.scheduleWorkers();
     for(const [messageId,job] of this.jobs) {
       const message=this.state.topology.messages.find(m=>m.id===messageId);
       if(!message||message.state!=='in-flight'||message.receiptHandle!==job.receipt) {this.jobs.delete(messageId);continue;}
@@ -213,7 +249,7 @@ export class AwsSimulationEngine {
     }
     for(const consumer of this.state.topology.consumers) {
       const config=workerConfig(consumer.worker);
-      if((config.autoProcess||config.autoPoll)&&consumer.status==='idle'&&time>=(this.lastPollAt.get(consumer.id)??-Infinity)+config.pollIntervalSeconds*1000) {
+      if((config.autoProcess||config.autoPoll)&&!this.waiting.has(consumer.id)&&this.canPoll(consumer.id)&&time>=(this.lastPollAt.get(consumer.id)??-Infinity)+config.pollIntervalSeconds*1000) {
         this.lastPollAt.set(consumer.id,time);
         this.poll(consumer.id);
       }
