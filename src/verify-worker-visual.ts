@@ -24,7 +24,7 @@ try {
     engine.load(scenario);engine.send('queue-orders','test');engine.tick();engine.poll('consumer-worker');
     const consumer=engine.state.topology.consumers[0], message=engine.state.topology.messages[0];
     assert(!details(consumer,engine.state.topology).includes('worker-message-dot'),'Não deve duplicar bolinha durante recepção');
-    assert(!connectionInfo(engine.state.topology).some(e=>e.from===consumer.id),'Sucesso não exibe retry');
+    assert(connectionInfo(engine.state.topology).some(e=>e.from===consumer.id),'Política retry mantém linha mesmo com sucesso');
     time+=849+duration*1000;engine.tick();
     assert(message.state==='in-flight','Prazo de processamento ignorado');
     time++;engine.tick();assert(message.state==='deleted','Sucesso não concluiu no prazo');

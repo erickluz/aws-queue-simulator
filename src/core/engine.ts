@@ -9,7 +9,7 @@ export const emptyTopology = (): AwsTopology => ({ format: 'aws-queue-simulator/
 export class AwsSimulationEngine {
   private waiting = new Map<string,number>();
   private jobs = new Map<string,{receipt:string; config:WorkerConfig}>();
-  private nextPoll = new Map<string,number>();
+  private lastPollAt = new Map<string,number>();
   state: SimulationState = { topology: emptyTopology(), animations: [], logs: [] }; private listeners = new Set<() => void>(); private timer = globalThis.setInterval(() => this.tick(), 500);
   subscribe(listener: () => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   destroy() { clearInterval(this.timer); }
@@ -21,7 +21,7 @@ export class AwsSimulationEngine {
     return animation;
   }
   private recalculate() { for (const queue of this.state.topology.queues) queue.metrics = metrics(); for (const message of this.state.topology.messages) { const queue = this.queue(message.queueId); if (!queue) continue; if (message.state === 'available') queue.metrics.available++; if (message.state === 'delayed') queue.metrics.delayed++; if (message.state === 'in-flight') queue.metrics.inFlight++; if (message.state === 'deleted') queue.metrics.deleted++; if (message.state === 'redriven') queue.metrics.redriven++; if (message.state === 'expired') queue.metrics.expired++; if (message.state === 'deduplicated') queue.metrics.deduplicated++; } }
-  load(topology: AwsTopology) { this.waiting.clear(); this.jobs.clear(); this.nextPoll.clear(); this.state = { topology: structuredClone(topology), animations: [], logs: [] }; this.emit(); }
+  load(topology: AwsTopology) { this.waiting.clear(); this.jobs.clear(); this.lastPollAt.clear(); this.state = { topology: structuredClone(topology), animations: [], logs: [] }; this.emit(); }
   removalIds(resourceId:string) {
     const t=this.state.topology, ids=new Set([resourceId]);
     t.producers.filter(p=>p.targetId===resourceId).forEach(p=>ids.add(p.id));
@@ -44,7 +44,7 @@ export class AwsSimulationEngine {
     for(const q of t.queues) if(q.deadLetterQueueId&&ids.has(q.deadLetterQueueId)) {
       q.deadLetterQueueId=undefined;q.maxReceiveCount=undefined;
     }
-    for(const resource of ids) {this.waiting.delete(resource);this.nextPoll.delete(resource);}
+    for(const resource of ids) {this.waiting.delete(resource);this.lastPollAt.delete(resource);}
     this.state.animations=this.state.animations.filter(a=>!a.nodes.some(n=>ids.has(n))&&t.messages.some(m=>m.id===a.messageId));
     this.emit();
   }
@@ -127,7 +127,7 @@ export class AwsSimulationEngine {
     const consumer=this.state.topology.consumers.find(c=>c.id===message.consumerId);
     if(consumer) {
       consumer.status='idle';
-      this.nextPoll.set(consumer.id,now()+workerConfig(consumer.worker).pollIntervalSeconds*1000);
+      this.lastPollAt.set(consumer.id,now());
     }
     this.jobs.delete(message.id);message.processingStartedAt=undefined;message.processingEndsAt=undefined;message.consumerId=undefined;
   }
@@ -208,13 +208,13 @@ export class AwsSimulationEngine {
       const consumer=this.state.topology.consumers.find(c=>c.id===consumerId);
       if(!consumer||time>=deadline) {
         this.waiting.delete(consumerId);
-        if(consumer) {consumer.status='idle';this.log('poll',`${consumer.name}: long polling terminou.`);}
+        if(consumer) {consumer.status='idle';this.lastPollAt.set(consumer.id,time);this.log('poll',`${consumer.name}: long polling terminou.`);}
       } else this.poll(consumerId);
     }
     for(const consumer of this.state.topology.consumers) {
       const config=workerConfig(consumer.worker);
-      if(config.autoPoll&&consumer.status==='idle'&&time>=(this.nextPoll.get(consumer.id)??0)) {
-        this.nextPoll.set(consumer.id,time+config.pollIntervalSeconds*1000);
+      if((config.autoProcess||config.autoPoll)&&consumer.status==='idle'&&time>=(this.lastPollAt.get(consumer.id)??-Infinity)+config.pollIntervalSeconds*1000) {
+        this.lastPollAt.set(consumer.id,time);
         this.poll(consumer.id);
       }
     }

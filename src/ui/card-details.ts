@@ -85,14 +85,14 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
   if(r.kind==='consumer') {
     const config=workerConfig(r.worker);
     fields+=select('Fila SQS','queueId',r.queueId,t.queues)+
-      check('Processar automaticamente após receber','autoProcess',config.autoProcess)+
+      check('Consumir e processar automaticamente','autoProcess',config.autoProcess)+
       input('Tempo de processamento automático (segundos)','processingSeconds',config.processingSeconds,'number',0,43200)+
       select('Resultado simulado','outcome',config.outcome,[{id:'success',name:'Sucesso — DeleteMessage'},{id:'failure',name:'Falha — aplicar política abaixo'}])+
       select('Ao falhar','failureAction',config.failureAction,[{id:'retry',name:'Retry — devolver após espera'},{id:'discard',name:'Descartar — DeleteMessage, sem retry'},{id:'wait',name:'Parar — aguardar visibility timeout'}])+
       input('Espera para retry (segundos)','retryDelaySeconds',config.retryDelaySeconds,'number',0,43200)+
-      check('Polling contínuo (uma mensagem por vez)','autoPoll',config.autoPoll)+
+      check('Buscar mensagens também no modo manual','autoPoll',config.autoPoll)+
       input('Intervalo entre polls (segundos)','pollIntervalSeconds',config.pollIntervalSeconds,'number',1,300)+
-      '<p>Configurações de processamento valem para a próxima recepção. O tempo começa após a chegada visual. Se a visibilidade expirar antes, a mensagem volta à fila; descarte é irreversível nesta simulação. Retry preserva a política de DLQ da fila.</p>';
+      '<p>O modo automático busca e processa uma mensagem por vez. O intervalo vale após concluir uma tentativa ou uma busca sem mensagens; ao editar, o próximo poll usa o novo valor. A busca no modo manual recebe a mensagem e aguarda sua ação.</p><p>Configurações de processamento valem para a próxima recepção. O tempo começa após a chegada visual. Se a visibilidade expirar antes, a mensagem volta à fila; descarte é irreversível nesta simulação. Retry preserva a política de DLQ da fila.</p>';
   }
   if(r.kind==='subscription') fields+=select('Tópico SNS','topicId',r.topicId,t.topics)+select('Fila SQS','queueId',r.queueId,t.queues)+check('Entrega bruta','rawDelivery',r.rawDelivery)+`<label>Filtro de atributos (JSON)<textarea name="filter" rows="4">${escapeHtml(JSON.stringify(r.filter,null,2))}</textarea></label>`;
   host.dataset.editorId=r.id;

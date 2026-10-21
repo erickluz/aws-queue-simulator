@@ -14,7 +14,11 @@ const advance=(ms:number)=>{time+=ms;engine.tick();};
 function setup(config:Partial<WorkerConfig>={}) {
   const t=createPreset();
   t.consumers[0].worker=workerConfig(config);
-  engine.load(t);engine.send('queue-orders','order');engine.tick();
+  engine.load(t);
+  // Isolate processing tests from the automatic receive tested in verify-auto-poll.
+  if(!config.autoPoll) engine.state.topology.consumers[0].worker!.autoProcess=false;
+  engine.send('queue-orders','order');engine.tick();
+  engine.state.topology.consumers[0].worker=workerConfig(config);
   return {consumer:engine.state.topology.consumers[0],message:engine.state.topology.messages[0],queue:engine.queue('queue-orders')!};
 }
 try {
@@ -34,8 +38,8 @@ try {
     assert(message.state==='in-flight'&&!message.consumerId,'Retry deve aguardar invisível');
     assert(consumer.status==='idle'&&consumer.processed===0&&consumer.retries===1,'Contadores de retry incorretos');
     advance(1999);assert(message.state==='in-flight','Retry antecipado');
-    advance(1);assert(String(message.state)==='available','Retry não devolveu');
-    engine.poll(consumer.id);assert(message.receivedCount===2,'Retry deve preservar ApproximateReceiveCount');
+    advance(1);assert(message.state==='in-flight'&&message.consumerId===consumer.id,'Retry não foi recebido automaticamente');
+    assert(message.receivedCount===2,'Retry deve preservar ApproximateReceiveCount');
   });
   test('Falha sem retry descarta via DeleteMessage, sem contar sucesso',()=>{
     const {message,consumer}=setup({autoProcess:true,processingSeconds:0,outcome:'failure',failureAction:'discard'});
@@ -48,12 +52,13 @@ try {
     const {message,consumer}=setup({autoProcess:true,processingSeconds:0,outcome:'failure',failureAction:'wait'});
     engine.poll(consumer.id);advance(850);
     assert(message.state==='in-flight'&&consumer.status==='idle','Abandono não liberou worker');
-    advance(29150);assert(String(message.state)==='available','Abandono não reentregou');
+    advance(29150);assert(message.state==='in-flight'&&message.receivedCount===2,'Abandono não reentregou automaticamente');
   });
   test('Timeout vence processamento longo e cancela conclusão obsoleta',()=>{
     const {message,consumer,queue}=setup({autoProcess:true,processingSeconds:10});
     queue.visibilityTimeout=2;engine.poll(consumer.id);advance(2000);
     assert(message.state==='available'&&consumer.status==='idle','Timeout não liberou');
+    consumer.worker!.autoProcess=false;
     advance(10000);assert(message.state==='available'&&consumer.processed===0,'Job obsoleto excluiu mensagem');
   });
   test('Polling contínuo é opcional e respeita o intervalo',()=>{
@@ -65,7 +70,7 @@ try {
     advance(1);assert(String(consumer.status)==='busy','Próximo poll não ocorreu');
   });
   test('Ações manuais cancelam a conclusão automática pendente',()=>{
-    const {message,consumer}=setup({autoProcess:true,processingSeconds:5});
+    const {message,consumer}=setup({autoProcess:true,processingSeconds:5,pollIntervalSeconds:10});
     engine.poll(consumer.id);engine.retryMessage(message.id,0);engine.tick();advance(6000);
     assert(message.state==='available'&&consumer.processed===0,'Conclusão obsoleta após retry manual');
   });

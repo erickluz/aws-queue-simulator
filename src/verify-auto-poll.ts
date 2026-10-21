@@ -1,0 +1,32 @@
+import { AwsSimulationEngine } from './core/engine';
+import { createPreset } from './ui/presets';
+import { workerConfig } from './domain/worker';
+import { connectionInfo } from './ui/connections';
+const assert=(ok:unknown,message:string)=>{if(!ok) throw new Error(message);};
+const originalNow=Date.now;let time=1_000_000;Date.now=()=>time;
+const engine=new AwsSimulationEngine();
+const advance=(ms:number)=>{time+=ms;engine.tick();};
+try {
+  const t=createPreset();t.queues[0].longPollingSeconds=0;
+  t.consumers[0].worker=workerConfig({autoProcess:true,autoPoll:false,processingSeconds:0,pollIntervalSeconds:2});
+  engine.load(t);engine.send('queue-orders','first');engine.send('queue-orders','second');engine.tick();
+  const c=engine.state.topology.consumers[0];
+  assert(c.status==='busy','Modo automático deve buscar mensagens sem exigir autoPoll');
+  advance(850);assert(c.processed===1,'Primeira mensagem não concluiu');
+  advance(1999);assert(c.status==='idle','Poll antes do intervalo');
+  advance(1);assert(c.status==='busy','Segunda mensagem não foi recebida após intervalo');
+  advance(850);assert(c.processed===2,'Segunda mensagem não concluiu');
+  c.worker!.pollIntervalSeconds=300;advance(2000);assert(c.status==='idle','Intervalo longo ignorado');
+  engine.send('queue-orders','third');c.worker!.pollIntervalSeconds=1;engine.tick();
+  assert(c.status==='busy','Alterar intervalo deve atualizar o próximo poll');
+  const edge=()=>connectionInfo(engine.state.topology).some(e=>e.from===c.id&&e.to===c.queueId);
+  assert(edge(),'Retry configurado deve ter linha mesmo com resultado sucesso');
+  c.worker!.autoProcess=false;assert(edge(),'Linha deve permanecer no modo manual');
+  c.worker!.failureAction='discard';assert(!edge(),'Desativar retry deve remover linha');
+  t.queues[0].longPollingSeconds=5;engine.load(t);engine.tick();
+  assert(engine.state.topology.consumers[0].status==='polling','Long polling não iniciou');
+  advance(5000);assert(engine.state.topology.consumers[0].status==='idle','Long polling deve aguardar intervalo ao terminar');
+  advance(1999);assert(engine.state.topology.consumers[0].status==='idle','Intervalo após long polling ignorado');
+  advance(1);assert(engine.state.topology.consumers[0].status==='polling','Long polling não reiniciou');
+  console.log('PASS consumo automático, intervalo dinâmico, long polling e linha persistente de retry');
+} finally {engine.destroy();Date.now=originalNow;}
