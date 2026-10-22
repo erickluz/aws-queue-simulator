@@ -15,6 +15,7 @@
     "verify:auto-poll": "node scripts/verify-engine.mjs src/verify-auto-poll.ts",
     "verify:batch": "node scripts/verify-engine.mjs src/verify-batch.ts",
     "verify:routing": "node scripts/verify-engine.mjs src/verify-routing.ts",
+    "verify:production": "node scripts/verify-engine.mjs src/verify-production.ts",
     "verify:worker-canvas": "node scripts/verify-engine.mjs src/verify-worker-canvas.ts"
   },
   "devDependencies": {

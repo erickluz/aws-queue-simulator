@@ -12,7 +12,7 @@ export function connectionInfo(t: AwsTopology) {
     ]),
     ...t.consumers.map(c=>({from:c.queueId,to:c.id,label:'ReceiveMessage · atributos + receipt handle'})),
     ...t.consumers.filter(c=>workerConfig(c.worker).failureAction==='retry')
-      .map(c=>({from:c.id,to:c.queueId,label:`Retry → SQS · ChangeMessageVisibility · espera ${workerConfig(c.worker).retryDelaySeconds}s`})),
+      .map(c=>({from:c.id,to:c.queueId,label:`Retry → SQS · ChangeMessageVisibility · espera ${workerConfig(c.worker).retryDelaySeconds}s · limite ${workerConfig(c.worker).maxRetries??'ilimitado'}`})),
     ...t.queues.filter(q=>q.deadLetterQueueId).map(q=>({from:q.id,to:q.deadLetterQueueId!,label:`Redrive · maxReceiveCount=${q.maxReceiveCount}`})),
   ];
 }

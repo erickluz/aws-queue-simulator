@@ -8,6 +8,7 @@ export interface WorkerConfig {
   pollIntervalSeconds: number;
   batchSize: number;
   concurrency: number;
+  maxRetries?: number;
 }
 export const workerDefaults: WorkerConfig = {
   autoProcess:false, processingSeconds:3, outcome:'success', failureAction:'retry',
@@ -20,6 +21,7 @@ export function validateWorker(value: unknown): string | undefined {
   if(!value||typeof value!=='object'||Array.isArray(value)) return 'Configuração do worker inválida.';
   const c=workerConfig(value);
   if(typeof c.autoProcess!=='boolean'||typeof c.autoPoll!=='boolean') return 'As opções automáticas devem ser booleanas.';
+  if(c.maxRetries!==undefined&&(!Number.isInteger(c.maxRetries)||c.maxRetries<0||c.maxRetries>1000)) return 'Máximo de retries deve estar entre 0 e 1000.';
   for(const [key,min,max] of [['processingSeconds',0,43200],['retryDelaySeconds',0,43200],['pollIntervalSeconds',1,300],['batchSize',1,10],['concurrency',1,100]] as const) {
     if(!Number.isInteger(c[key])||c[key]<min||c[key]>max) return `${key} deve estar entre ${min} e ${max} segundos inteiros.`;
   }

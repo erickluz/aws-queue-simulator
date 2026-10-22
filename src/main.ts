@@ -55,7 +55,7 @@ function render() {
     <section id="resource-actions"></section>
     <section><h2>Mensagens recebidas</h2><p>ReceiveMessage retira da área disponível. Mensagens aguardando vaga também estão sob visibility timeout.</p>
     ${t.messages.filter(m=>m.state==='in-flight').map(m=>`<div class="message"><b>${esc(m.id)}</b><small>Receipt: ${esc(m.receiptHandle)}</small>
-      <p>MessageAttributes: ${esc(JSON.stringify(m.attributes))}<br>ApproximateReceiveCount: ${m.receivedCount}</p>
+      <p>MessageAttributes: ${esc(JSON.stringify(m.attributes))}<br>ApproximateReceiveCount: ${m.receivedCount}<br>Retries: ${m.retryCount??0}${m.invalid?'<br>Conteúdo inválido simulado':''}</p>
       ${m.consumerId?`${m.processingStartedAt===undefined?'<p>Aguardando vaga / grupo FIFO.</p>':button('Concluir — DeleteMessage',`delete:${m.id}`)} ${button('Retry',`retry:${m.id}`)} ${button('Descartar',`discard:${m.id}`)} ${button('Aguardar timeout',`abandon:${m.id}`)} ${button('Visibility +30s',`visibility:${m.id}`)}`:'<p>Aguardando reentrega após visibilidade.</p>'}</div>`).join('')||'<p>Nenhuma mensagem em voo.</p>'}</section>
     <section><h2>Eventos</h2><select id="filter"><option value="all">Todos</option><option value="timeout">Timeout</option><option value="redrive">Redrive</option><option value="deduplicated">Deduplicação</option><option value="worker">Worker</option><option value="retry">Retry</option><option value="discard">Descarte</option></select><ol>
     ${engine.state.logs.filter(l=>logFilter==='all'||l.type===logFilter).slice(0,12).map(l=>`<li><b>${l.type}</b> ${esc(l.message)}</li>`).join('')}</ol></section>
@@ -88,13 +88,10 @@ function action(value:string) {
     return;
   }
   if(kind==='publish') {
-    const producer=engine.state.topology.producers.find(p=>p.id===id)!;
-    const target=engine.topic(producer.targetId)??engine.queue(producer.targetId);
-    const template=producer.messageTemplate??{body:'{"orderId":"order-001"}',attributes:{eventType:'order.created'}};
-    const options=target?.queueKind==='fifo'?{groupId:template.groupId||'orders',deduplicationId:template.deduplicationId||crypto.randomUUID()}:{};
-    const error=target?.kind==='queue'?engine.sendFromProducer(id,template.body,template.attributes,options):engine.publishFromProducer(id,template.body,template.attributes,options);
-    if(!error) producer.sent++;
+    engine.produceMessage(id);
   }
+  if(kind==='start-production') engine.startProducer(id);
+  if(kind==='pause-production') engine.pauseProducer(id);
   if(kind==='poll') engine.poll(id);
   if(kind==='delete') engine.deleteMessage(id);
   if(kind==='retry') engine.retryMessage(id);
@@ -242,7 +239,7 @@ function refresh() {
   const actions=app.querySelector('#resource-actions')!;
   const selected=resources().find(r=>r.id===selectedId);
   actions.innerHTML=selected?`<h2>Ações do recurso</h2>${
-    selected.kind==='producer'?button(engine.queue(selected.targetId)?'Enviar SQS':'Publicar SNS',`publish:${selected.id}`):
+    selected.kind==='producer'?`${button(engine.queue(selected.targetId)?'Enviar SQS':'Publicar SNS',`publish:${selected.id}`)} ${button(selected.running?'Pausar produção':'Iniciar produção',`${selected.running?'pause-production':'start-production'}:${selected.id}`)}`:
     selected.kind==='consumer'?button('Receber mensagem (polling)',`poll:${selected.id}`):
     '<p>Edite as propriedades acima.</p>'}${button('Excluir card',`remove:${selected.id}`)}`:'<h2>Inspector</h2><p>Clique em um card para editar e acessar suas ações. Arraste para reposicionar.</p>';
   if(selected?.kind==='consumer'&&!engine.canPoll(selected.id)) actions.querySelector('button')!.disabled=true;

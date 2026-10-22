@@ -2,6 +2,7 @@ import type { AwsTopology, Producer, Consumer, SnsTopic, SqsQueue, Subscription 
 import { validateQueue, validateTopic, compatibleKinds } from '../domain/validation';
 import { workerConfig, validateWorker } from '../domain/worker';
 import { workerStatus } from './worker-status';
+import { productionConfig, validateProduction } from '../domain/production';
 export type Resource = Producer | Consumer | SnsTopic | SqsQueue | Subscription;
 export const escapeHtml = (v: unknown) => String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export const allResources = (t: AwsTopology): Resource[] => [...t.producers,...t.topics,...t.queues,...t.subscriptions,...t.consumers];
@@ -13,7 +14,12 @@ export function details(r: Resource, t: AwsTopology) {
   };
   const stat = (label: string, value: unknown) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`;
   let content = '';
-  if(r.kind==='producer') content=stat('Enviadas',r.sent)+stat('Destino',name(r.targetId));
+  if(r.kind==='producer') {
+    const config=productionConfig(r.production);
+    content=`<div class="producer-state ${r.running?'running':'paused'}"><i></i><b>${r.running?'Produzindo automaticamente':'Produção pausada'}</b></div>`+
+      stat('Enviadas',r.sent)+stat('Inválidas geradas',r.invalidProduced??0)+stat('Emissão',`${config.messagesPerEmission} a cada ${config.intervalMs}ms`)+
+      stat('Taxa alvo',`${Number((config.messagesPerEmission*1000/config.intervalMs).toFixed(2))} msg/s`)+stat('Conteúdo inválido',`${config.invalidPercent}%`)+stat('Destino',name(r.targetId));
+  }
   if(r.kind==='topic') content=stat('Publicadas',r.published)+stat('Assinaturas',t.subscriptions.filter(s=>s.topicId===r.id).length)+stat('Deduplicação por conteúdo',r.contentDeduplication?'Ativa':'Inativa');
   if(r.kind==='queue') {
     const messages=t.messages.filter(m=>m.queueId===r.id&&['available','delayed'].includes(m.state));
@@ -28,6 +34,7 @@ export function details(r: Resource, t: AwsTopology) {
     content=stat('Status',({idle:'Ocioso',polling:'Aguardando polling',busy:'Processando'})[r.status])+
       stat('Modo',config.autoProcess?'Automático':'Manual')+stat('Processamento',`${config.processingSeconds}s`)+
       stat('Mensagens por poll',config.batchSize)+stat('Concorrência máxima',config.concurrency)+
+      stat('Limite de retries',config.maxRetries??'Sem limite')+
       stat('Sucessos',r.processed)+stat('Descartadas',r.discarded??0)+stat('Retries',r.retries??0)+stat('Fila',name(r.queueId));
   }
   if(r.kind==='subscription') content=stat('SNS',name(r.topicId))+stat('SQS',name(r.queueId))+stat('Entrega',r.rawDelivery?'Bruta':'Envelope')+stat('Filtro',Object.keys(r.filter).length?JSON.stringify(r.filter):'Todas as mensagens');
@@ -59,6 +66,7 @@ export function updateResource(t: AwsTopology, id: string, values: Record<string
     if(t.subscriptions.some(other=>other.id!==s.id&&other.topicId===s.topicId&&other.queueId===s.queueId)) return 'Esta assinatura já existe.';
   }
   if(candidate.kind==='producer'&&!topics.some(n=>n.id===candidate.targetId)&&!queues.some(n=>n.id===candidate.targetId)) return 'Destino não encontrado.';
+  if(candidate.kind==='producer') {const error=validateProduction(candidate.production);if(error) return error;}
   if(candidate.kind==='consumer') {
     const error=validateWorker(candidate.worker); if(error) return error;
     if(!queues.some(n=>n.id===candidate.queueId)) return 'Fila não encontrada.';
@@ -79,6 +87,12 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
   if(r.kind==='topic') fields+=check('Deduplicação por conteúdo (FIFO)','contentDeduplication',r.contentDeduplication);
   if(r.kind==='queue') fields+=input('Delay (segundos)','delaySeconds',r.delaySeconds,'number',0,900)+input('Visibilidade (segundos)','visibilityTimeout',r.visibilityTimeout,'number',0,43200)+input('Retenção (segundos)','retentionSeconds',r.retentionSeconds,'number',60,1209600)+input('Long polling (segundos)','longPollingSeconds',r.longPollingSeconds,'number',0,20)+select('DLQ','deadLetterQueueId',r.deadLetterQueueId??'',[{id:'',name:'Sem DLQ'},...t.queues.filter(q=>q.id!==r.id)])+input('Máximo de recebimentos','maxReceiveCount',r.maxReceiveCount??5,'number',1,1000);
   if(r.kind==='producer') {
+    const production=productionConfig(r.production);
+    fields+=input('Intervalo entre emissões (ms)','intervalMs',production.intervalMs,'number',100,60000)+
+      input('Mensagens por emissão','messagesPerEmission',production.messagesPerEmission,'number',1,10)+
+      input('Mensagens inválidas (%)','invalidPercent',production.invalidPercent,'number',0,100)+
+      select('IDs de deduplicação na produção automática FIFO','deduplicationMode',production.deduplicationMode,[{id:'unique',name:'ID único por mensagem'},{id:'template',name:'Reutilizar o ID do template'}])+
+      '<p>Salve e use Iniciar produção no painel de ações. 1000ms = uma emissão por segundo. A produção continua até pausar; alterações salvas valem para a próxima emissão. Ao importar ou trocar de cenário, o produtor fica pausado.</p><p>O percentual é uma probabilidade por mensagem. Conteúdo inválido (JSON malformado) atravessa SNS/SQS e força a política de falha do consumidor automático, mesmo quando o resultado está em Sucesso. Não representa rejeição pela AWS. O envio manual utiliza o template sem injetar falhas.</p>';
     fields+=select('Destino','targetId',r.targetId,[...t.topics.map(n=>({...n,name:`SNS · ${n.name}`})),...t.queues.map(n=>({...n,name:`SQS · ${n.name}`}))]);
     const template=r.messageTemplate??{body:'{"orderId":"order-001"}',attributes:{eventType:'order.created'}};
     fields+=`<label>Corpo da mensagem<textarea name="messageBody" rows="3">${escapeHtml(template.body)}</textarea></label><label>MessageAttributes (JSON)<textarea name="messageAttributes" rows="4">${escapeHtml(JSON.stringify(template.attributes,null,2))}</textarea></label><label>MessageGroupId (FIFO)<input name="groupId" value="${escapeHtml(template.groupId??'')}"></label><label>MessageDeduplicationId (FIFO, opcional)<input name="deduplicationId" value="${escapeHtml(template.deduplicationId??'')}"></label><p>Salve antes de publicar. No exemplo FIFO, repetir o ID demonstra a deduplicação.</p>`;
@@ -93,6 +107,9 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
       select('Resultado simulado','outcome',config.outcome,[{id:'success',name:'Sucesso — DeleteMessage'},{id:'failure',name:'Falha — aplicar política abaixo'}])+
       select('Ao falhar','failureAction',config.failureAction,[{id:'retry',name:'Retry — devolver após espera'},{id:'discard',name:'Descartar — DeleteMessage, sem retry'},{id:'wait',name:'Parar — aguardar visibility timeout'}])+
       input('Espera para retry (segundos)','retryDelaySeconds',config.retryDelaySeconds,'number',0,43200)+
+      check('Limitar retries por mensagem','limitRetries',config.maxRetries!==undefined)+
+      input('Máximo de retries antes de descartar','maxRetries',config.maxRetries??3,'number',0,1000)+
+      '<p>Limite 0 descarta na primeira falha. Limite 2 permite dois retornos; a próxima falha descarta via DeleteMessage. O contador acompanha a mensagem entre consumidores e é independente do maxReceiveCount da DLQ. Sem marcar a opção, não há limite local.</p>'+
       check('Buscar mensagens também no modo manual','autoPoll',config.autoPoll)+
       input('Intervalo entre polls (segundos)','pollIntervalSeconds',config.pollIntervalSeconds,'number',1,300)+
       '<p>O lote define quantas mensagens cada poll pode receber. A concorrência limita quantas processam juntas; o restante aguarda no consumidor, já sob visibility timeout. Novos polls respeitam o intervalo e a capacidade livre, com buffer limitado ao maior valor entre lote e concorrência. No modo manual, as mensagens aguardam sua ação.</p><p>O tempo de processamento começa após a chegada e a liberação de uma vaga. FIFO processa um item por grupo de cada vez. Reduzir a concorrência não interrompe tentativas já iniciadas. As configurações de resultado e duração valem para o próximo lote recebido.</p>';
@@ -113,12 +130,15 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
     try {
       if(r.kind==='consumer') {
         values.worker={autoProcess:data.has('autoProcess'),autoPoll:data.has('autoPoll'),
+          maxRetries:data.has('limitRetries')?Number(values.maxRetries):undefined,
           batchSize:Number(values.batchSize),concurrency:Number(values.concurrency),
           processingSeconds:Number(values.processingSeconds),retryDelaySeconds:Number(values.retryDelaySeconds),
           pollIntervalSeconds:Number(values.pollIntervalSeconds),outcome:values.outcome,failureAction:values.failureAction};
-        for(const key of ['autoProcess','autoPoll','processingSeconds','retryDelaySeconds','pollIntervalSeconds','outcome','failureAction','batchSize','concurrency']) delete values[key];
+        for(const key of ['autoProcess','autoPoll','processingSeconds','retryDelaySeconds','pollIntervalSeconds','outcome','failureAction','batchSize','concurrency','limitRetries','maxRetries']) delete values[key];
       }
       if(r.kind==='producer') {
+        values.production={intervalMs:Number(values.intervalMs),messagesPerEmission:Number(values.messagesPerEmission),invalidPercent:Number(values.invalidPercent),deduplicationMode:values.deduplicationMode};
+        for(const key of ['intervalMs','messagesPerEmission','invalidPercent','deduplicationMode']) delete values[key];
         const attributes:unknown=JSON.parse(String(values.messageAttributes));
         if(!attributes||Array.isArray(attributes)||typeof attributes!=='object'||Object.values(attributes).some(v=>typeof v!=='string')) throw new Error('MessageAttributes deve ser um objeto JSON com valores de texto.');
         values.messageTemplate={body:String(data.get('messageBody')??''),attributes,groupId:values.groupId||undefined,deduplicationId:values.deduplicationId||undefined};

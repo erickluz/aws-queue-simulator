@@ -1,4 +1,10 @@
 :root { font-size:16px; }
+.producer-state { padding:10px; border:1px solid #60758c; border-radius:10px; gap:8px; }
+.producer-state i { width:9px; height:9px; flex-shrink:0; border-radius:50%; background:#8ba0ba; margin-top:4px; }
+.producer-state.running { background:#164137; border-color:#34d399; }
+.producer-state.running i { background:#34d399; box-shadow:0 0 10px #34d399; }
+.card-stats .producer-state b { max-width:100%; }
+.node:has(.producer-state.running) { border-color:#34d399; }
 body { overflow:hidden; }
 header { height:auto; min-height:92px; margin-top:12px; }
 header span { font-size:13px; }
