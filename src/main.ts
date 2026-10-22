@@ -4,6 +4,7 @@ import './glass.css';
 import './ui/editor.css';
 import './ui/card-details.css';
 import './ui/workspace.css';
+import './ui/control-panel.css';
 import { CanvasViewport, dragPosition } from './ui/viewport';
 import { allResources, details, escapeHtml as esc, mountInspector } from './ui/card-details';
 import { openResourceDialog } from './ui/resource-editor';
@@ -29,10 +30,11 @@ let logFilter='all';
 let renderedKey='';
 let animationFrame=0;
 let viewportInitialized=false;
+let inspectorTab='config';
 const button=(label:string,action:string)=>`<button data-action="${esc(action)}">${esc(label)}</button>`;
 const resources=()=>allResources(engine.state.topology);
 function selectResource(id?:string) {
-  selectedId=id; editorHost=undefined;
+  selectedId=id; editorHost=undefined;inspectorTab='config';
   (document.activeElement as HTMLElement|null)?.blur();
   refresh(); app.querySelector('aside')?.scrollTo({top:0});
 }
@@ -41,7 +43,15 @@ function render() {
   const width=Math.max(1900,...resources().map(r=>r.position.x+340));
   const height=Math.max(1000,...resources().map(r=>r.position.y+600));
   app.innerHTML=`<header><div><b>AWS Queue Lab</b><span>SNS + SQS visual simulator</span></div><nav>
-    ${button('Novo','new')}${button('Novo tópico','topic')}${button('Nova fila','queue')}${button('Assinatura','subscription')}${button('Produtor','producer')}${button('Consumidor','consumer')}${button('Exportar','export')}
+    <details class="resource-menu"><summary><span aria-hidden="true">＋</span> Adicionar recurso <span aria-hidden="true">⌄</span></summary><div class="resource-menu-content" aria-label="Criar recurso">
+      <p>CONSTRUA SEU FLUXO</p>${([
+        ['producer','↗','Produtor','Envia mensagens para SNS ou SQS'],
+        ['topic','◎','Tópico SNS','Distribui publicações às assinaturas'],
+        ['queue','▤','Fila SQS','Armazena mensagens para consumo'],
+        ['subscription','⇄','Assinatura','Conecta um tópico a uma fila'],
+        ['consumer','▷','Consumidor','Recebe e processa mensagens']
+      ]).map(([kind,icon,title,description])=>`<button data-action="${kind}"><i aria-hidden="true">${icon}</i><span><b>${title}</b><small>${description}</small></span><em aria-hidden="true">＋</em></button>`).join('')}</div></details>
+    ${button('Novo cenário','new')}${button('Exportar','export')}
     <label class="file">Importar<input id="import" type="file" accept="application/json"></label></nav></header>
     <main><section class="workspace"><div class="canvas-controls" role="toolbar" aria-label="Navegação do canvas">
       <button data-view="out" aria-label="Diminuir zoom">−</button><output aria-live="polite">100%</output><button data-view="in" aria-label="Aumentar zoom">+</button>
@@ -51,15 +61,17 @@ function render() {
     ${resources().map(r=>`<article tabindex="0" aria-label="${esc(labels[r.kind])}: ${esc('name' in r?r.name:'Assinatura SNS')}" class="node ${labels[r.kind]} ${r.id===selectedId?'selected':''}" data-id="${esc(r.id)}" style="left:${r.position.x}px;top:${r.position.y}px">
       <small>${labels[r.kind]}</small><strong>${esc('name' in r?r.name:Object.keys(r.filter).length?'Filtro ativo':'Todas as mensagens')}</strong>
       ${'queueKind' in r?`<em>${r.queueKind.toUpperCase()}</em>`:''}${details(r,t)}</article>`).join('')}
-    </div></div></section><aside>
-    <section id="resource-actions"></section>
-    <section><h2>Mensagens recebidas</h2><p>ReceiveMessage retira da área disponível. Mensagens aguardando vaga também estão sob visibility timeout.</p>
+    </div></div></section><aside class="control-panel" aria-label="Painel de recursos">
+    <div class="panel-heading"><span class="panel-eyebrow">SEU AMBIENTE</span><h2>Central de controle</h2><p>Configure, execute e acompanhe o fluxo.</p></div>
+    <div class="panel-tabs" role="group" aria-label="Seções do painel">${[['config','Configuração'],['messages','Mensagens'],['events','Eventos'],['presets','Exemplos']].map(([id,label])=>`<button data-panel-tab="${id}" aria-pressed="${inspectorTab===id}" aria-controls="panel-${id}">${label}</button>`).join('')}</div>
+    <div id="panel-config" class="panel-page" ${inspectorTab==='config'?'':'hidden'}><section id="resource-actions"></section></div>
+    <section id="panel-messages" class="panel-page" ${inspectorTab==='messages'?'':'hidden'}><h2>Mensagens recebidas</h2><p>ReceiveMessage retira da área disponível. Mensagens aguardando vaga também estão sob visibility timeout.</p>
     ${t.messages.filter(m=>m.state==='in-flight').map(m=>`<div class="message"><b>${esc(m.id)}</b><small>Receipt: ${esc(m.receiptHandle)}</small>
       <p>MessageAttributes: ${esc(JSON.stringify(m.attributes))}<br>ApproximateReceiveCount: ${m.receivedCount}<br>Retries: ${m.retryCount??0}${m.invalid?'<br>Conteúdo inválido simulado':''}</p>
       ${m.consumerId?`${m.processingStartedAt===undefined?'<p>Aguardando vaga / grupo FIFO.</p>':button('Concluir — DeleteMessage',`delete:${m.id}`)} ${button('Retry',`retry:${m.id}`)} ${button('Descartar',`discard:${m.id}`)} ${button('Aguardar timeout',`abandon:${m.id}`)} ${button('Visibility +30s',`visibility:${m.id}`)}`:'<p>Aguardando reentrega após visibilidade.</p>'}</div>`).join('')||'<p>Nenhuma mensagem em voo.</p>'}</section>
-    <section><h2>Eventos</h2><select id="filter"><option value="all">Todos</option><option value="timeout">Timeout</option><option value="redrive">Redrive</option><option value="deduplicated">Deduplicação</option><option value="worker">Worker</option><option value="retry">Retry</option><option value="discard">Descarte</option></select><ol>
+    <section id="panel-events" class="panel-page" ${inspectorTab==='events'?'':'hidden'}><h2>Eventos</h2><select id="filter" aria-label="Filtrar eventos"><option value="all">Todos</option><option value="timeout">Timeout</option><option value="redrive">Redrive</option><option value="deduplicated">Deduplicação</option><option value="worker">Worker</option><option value="retry">Retry</option><option value="discard">Descarte</option></select><ol>
     ${engine.state.logs.filter(l=>logFilter==='all'||l.type===logFilter).slice(0,12).map(l=>`<li><b>${l.type}</b> ${esc(l.message)}</li>`).join('')}</ol></section>
-    <section><h2>Presets</h2>${button('SNS fan-out','preset:fanout')}${button('Filtro de atributo','preset:filter')}${button('FIFO/deduplicação','preset:fifo')}${button('Retry e DLQ','preset:retry')}</section>
+    <section id="panel-presets" class="panel-page" ${inspectorTab==='presets'?'':'hidden'}><h2>Comece com um exemplo</h2><p>Carregar um exemplo substitui o cenário atual.</p>${button('SNS fan-out','preset:fanout')}${button('Filtro de atributo','preset:filter')}${button('FIFO/deduplicação','preset:fifo')}${button('Retry e DLQ','preset:retry')}</section>
     </aside></main><dialog id="modal"></dialog>`;
 }
 function action(value:string) {
@@ -79,6 +91,7 @@ function action(value:string) {
     engine.removeResource(id);return;
   }
   if(['topic','queue','subscription','producer','consumer'].includes(kind)) {
+    app.querySelector<HTMLDetailsElement>('.resource-menu')!.open=false;
     openResourceDialog(engine,kind as ResourceKind,refresh); return;
   }
   if(kind==='preset') {
@@ -215,14 +228,19 @@ function drag(el:HTMLElement) {
 function refresh() {
   if(dragging||app.querySelector('dialog[open]')) return;
   const clock=engine.state.topology.messages.some(m=>m.processingStartedAt||m.retryArrivesAt)?Math.floor(Date.now()/1000):0;
-  const key=JSON.stringify([engine.state.topology,engine.state.logs,engine.state.animations.map(a=>a.id),selectedId,logFilter,clock]);
+  const key=JSON.stringify([engine.state.topology,engine.state.logs,engine.state.animations.map(a=>a.id),selectedId,logFilter,clock,inspectorTab]);
   if(key===renderedKey) return;
   const focused=app.querySelector('input:focus,select:focus,textarea:focus');
   // The editor survives renders, including unfinished edits and focus.
   if(focused&&!(editorHost?.contains(focused))) return;
   renderedKey=key;
   const focus=focused as HTMLElement|null;
+  const active=document.activeElement as HTMLElement|null;
+  const controlFocus=active?.matches('.resource-menu summary')?'.resource-menu summary':
+    active?.dataset.panelTab?`[data-panel-tab="${CSS.escape(active.dataset.panelTab)}"]`:
+    active?.dataset.action?`[data-action="${CSS.escape(active.dataset.action)}"]`:undefined;
   const sidebarScroll=app.querySelector('aside')?.scrollTop??0;
+  const menuOpen=app.querySelector<HTMLDetailsElement>('.resource-menu')?.open??false;
   editorHost?.remove(); render();
   if(selectedId) {
     const r=resources().find(r=>r.id===selectedId);
@@ -233,7 +251,7 @@ function refresh() {
           editorHost=undefined;(document.activeElement as HTMLElement|null)?.blur();refresh();
         },()=>selectResource());
       }
-      app.querySelector('aside')!.prepend(editorHost);
+      app.querySelector('#panel-config')!.append(editorHost);
     } else {selectedId=undefined;editorHost=undefined;}
   }
   const actions=app.querySelector('#resource-actions')!;
@@ -241,9 +259,15 @@ function refresh() {
   actions.innerHTML=selected?`<h2>Ações do recurso</h2>${
     selected.kind==='producer'?`${button(engine.queue(selected.targetId)?'Enviar SQS':'Publicar SNS',`publish:${selected.id}`)} ${button(selected.running?'Pausar produção':'Iniciar produção',`${selected.running?'pause-production':'start-production'}:${selected.id}`)}`:
     selected.kind==='consumer'?button('Receber mensagem (polling)',`poll:${selected.id}`):
-    '<p>Edite as propriedades acima.</p>'}${button('Excluir card',`remove:${selected.id}`)}`:'<h2>Inspector</h2><p>Clique em um card para editar e acessar suas ações. Arraste para reposicionar.</p>';
+    '<p>Configure as propriedades e salve abaixo.</p>'}${button('Excluir card',`remove:${selected.id}`)}`:'<div class="inspector-empty"><span aria-hidden="true">⌘</span><h2>Selecione um recurso</h2><p>Clique em um card para configurar seu comportamento e acessar as ações.</p><p>Para começar do zero, use <b>Adicionar recurso</b> no topo.</p></div>';
   if(selected?.kind==='consumer'&&!engine.canPoll(selected.id)) actions.querySelector('button')!.disabled=true;
   app.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action!));
+  const resourceMenu=app.querySelector<HTMLDetailsElement>('.resource-menu')!;
+  resourceMenu.open=menuOpen;
+  resourceMenu.onkeydown=e=>{if(e.key==='Escape'){resourceMenu.open=false;resourceMenu.querySelector('summary')!.focus();}};
+  resourceMenu.addEventListener('focusout',e=>{if(e.relatedTarget instanceof Node&&!resourceMenu.contains(e.relatedTarget)) resourceMenu.open=false;});
+  app.onclick=e=>{if(e.target instanceof Node&&!resourceMenu.contains(e.target)) resourceMenu.open=false;};
+  app.querySelectorAll<HTMLButtonElement>('[data-panel-tab]').forEach(b=>b.onclick=()=>{inspectorTab=b.dataset.panelTab!;refresh();app.querySelector<HTMLButtonElement>(`[data-panel-tab="${inspectorTab}"]`)!.focus();});
   app.querySelector<HTMLInputElement>('#import')!.onchange=async e=>{
     const file=(e.target as HTMLInputElement).files?.[0];if(!file) return;
     try {const t=importTopology(await file.text());selectedId=undefined;editorHost=undefined;engine.load(t);viewport.fit();}
@@ -257,6 +281,7 @@ function refresh() {
   if(!viewportInitialized) {viewportInitialized=true;viewport.fit();}
   app.querySelector('aside')?.scrollTo({top:sidebarScroll});
   if(focus&&editorHost?.contains(focus)) focus.focus({preventScroll:true});
+  else if(controlFocus) app.querySelector<HTMLElement>(controlFocus)?.focus({preventScroll:true});
 }
 engine.load(createPreset());
 const unsubscribe=engine.subscribe(refresh);

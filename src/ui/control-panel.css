@@ -1,0 +1,68 @@
+/* Scoped to creation controls and the inspector; canvas and cards are unchanged. */
+header:has(.resource-menu) { position:relative; z-index:30; }
+.resource-menu { position:relative; }
+.resource-menu > summary { display:flex; align-items:center; gap:10px; min-height:44px; padding:10px 16px; border:1px solid #c4b5fd80; border-radius:12px; background:linear-gradient(135deg,#a78bfa35,#818cf820); color:#f0eaff; cursor:pointer; font-size:14px; font-weight:600; list-style:none; }
+.resource-menu > summary::-webkit-details-marker { display:none; }
+.resource-menu > summary span { display:inline; margin:0; color:inherit; font-size:18px; }
+.resource-menu[open] > summary,.resource-menu > summary:hover { background:#a78bfa40; }
+.resource-menu-content { position:absolute; top:calc(100% + 12px); right:0; width:340px; max-width:calc(100vw - 48px); max-height:70dvh; overflow:auto; padding:12px; border:1px solid #ffffff30; border-radius:18px; background:linear-gradient(145deg,#27334af5,#171e36f5); backdrop-filter:blur(28px); box-shadow:0 24px 64px #0008,inset 0 1px #ffffff20; }
+.resource-menu-content > p { margin:6px 10px 12px; font-size:11px; letter-spacing:1.5px; color:#b8c6df; }
+.resource-menu-content button { width:100%; display:flex; gap:12px; align-items:center; text-align:left; padding:12px 10px; background:transparent; border-color:transparent; border-radius:12px; }
+.resource-menu-content button:hover { background:#c4b5fd14; border-color:#c4b5fd40; }
+.resource-menu-content button i { display:grid; place-items:center; width:38px; height:38px; flex-shrink:0; border:1px solid #c4b5fd30; background:#b8a6ff14; border-radius:11px; font-style:normal; color:#d6c9ff; font-size:22px; }
+.resource-menu-content button span { margin:0; letter-spacing:0; }
+.resource-menu-content button b { display:block; font-size:14px; letter-spacing:0; font-weight:600; }
+.resource-menu-content button small { display:block; margin-top:3px; color:#b2c0d8; font-size:12px; line-height:1.5; }
+.resource-menu-content button em { margin-left:auto; font-style:normal; color:#a6b4ce; }
+.control-panel { padding:0; background:linear-gradient(150deg,#29344b99,#121d31cc); backdrop-filter:blur(28px); box-shadow:inset 0 1px #ffffff16; scrollbar-width:thin; scrollbar-color:#7384a066 transparent; }
+.control-panel .panel-heading { padding:22px 20px 16px; }
+.control-panel .panel-eyebrow { display:block; font-size:10px; font-weight:700; letter-spacing:1.8px; color:#b7abef; margin-bottom:8px; }
+.control-panel .panel-heading h2 { font-size:21px; font-weight:600; letter-spacing:-.5px; margin:0; }
+.control-panel .panel-heading p { font-size:13px; margin:6px 0 0; color:#aabbd4; }
+.control-panel .panel-tabs { display:flex; position:sticky; top:0; z-index:2; padding:8px 10px; gap:3px; background:#182338f2; backdrop-filter:blur(20px); border-block:1px solid #ffffff12; }
+.control-panel .panel-tabs button { flex:1; min-width:0; padding:10px 3px; border-color:transparent; background:transparent; border-radius:8px; font-size:12px; color:#aebdd4; }
+.control-panel .panel-tabs button[aria-pressed="true"] { color:#f0eaff; background:#b09cff20; border-color:#b09cff44; box-shadow:inset 0 1px #ffffff10; }
+.control-panel .panel-page { padding:18px; margin:0; border:0; }
+.control-panel [hidden] { display:none !important; }
+.control-panel section { margin:0; border:0; }
+.control-panel #resource-actions { display:flex; flex-wrap:wrap; gap:8px; padding:0 0 18px; }
+.control-panel #resource-actions > h2 { flex-basis:100%; font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#afbdd3; margin:0 0 4px; }
+.control-panel #resource-actions > p { margin:0; }
+.control-panel #resource-actions button { flex:1 1 auto; min-height:40px; font-size:13px; }
+.control-panel #resource-actions button[data-action^="start-production:"] { background:#38bda91c; border-color:#5eead455; color:#adf5dc; }
+.control-panel #resource-actions button[data-action^="remove:"] { flex-basis:100%; margin-top:4px; border-color:transparent; background:transparent; color:#f5a5b5; font-size:12px; }
+.control-panel #resource-actions button[data-action^="remove:"]:hover { background:#fb718518; border-color:#fb718555; }
+.control-panel [data-editor-id] { padding:0; border:0; background:none; border-radius:0; }
+.control-panel .inspector-heading { padding:16px 0 6px; border-top:1px solid #ffffff16; }
+.control-panel .inspector-heading h2 { font-size:18px; }
+.control-panel .inspector-heading p { font-size:12px; margin:0 0 14px; }
+.control-panel fieldset { min-width:0; margin:0 0 18px; padding:8px 14px 14px; border:1px solid #ffffff18; border-radius:14px; background:linear-gradient(145deg,#ffffff07,#ffffff02); }
+.control-panel legend { padding:0 7px; margin-left:-3px; color:#d4def0; font-size:13px; font-weight:600; }
+.control-panel label { font-size:13px; font-weight:500; line-height:1.5; margin:12px 0 0; color:#bac9df; overflow-wrap:anywhere; }
+.control-panel :is(input,select,textarea),#modal :is(input,select,textarea) { min-height:42px; padding:10px 12px; margin-top:7px; color:#edf3ff; border:1px solid #95afd32e; border-radius:9px; background:#09142566; font-size:14px; box-shadow:inset 0 1px 3px #0002; }
+.control-panel textarea { line-height:1.65; }
+.control-panel select option,#modal select option { background:#182338; color:#edf3ff; }
+.control-panel :is(input,select,textarea):focus,#modal :is(input,select,textarea):focus { outline:2px solid #b6a2fb; outline-offset:2px; border-color:transparent; }
+.control-panel .check,#modal .check { padding:10px; border:1px solid #ffffff12; background:#ffffff04; border-radius:10px; gap:12px; cursor:pointer; }
+.control-panel .check input,#modal .check input { width:18px; height:18px; min-height:18px; margin:0; flex-shrink:0; accent-color:#bda7ff; box-shadow:none; }
+.control-panel .inspector-help { padding:12px; background:#8ca9e509; border:1px solid #8ca9e51c; border-radius:12px; }
+.control-panel .inspector-help summary { cursor:pointer; color:#b9c9e4; font-size:12px; line-height:1.5; }
+.control-panel .inspector-help p { font-size:12px; line-height:1.7; }
+.control-panel .editor-actions { position:sticky; bottom:0; margin:12px -4px -4px; padding:12px; border:1px solid #ffffff20; border-radius:13px; background:#202b43f5; backdrop-filter:blur(20px); box-shadow:0 -8px 24px #0002; }
+.control-panel .save-status { flex-basis:100%; font-size:11px; color:#bbc8dd; }
+.control-panel .editor-actions button[type="submit"],#modal button[type="submit"] { flex:1; background:linear-gradient(135deg,#c4b5fd,#9caefb); color:#18213b; border-color:#dacfff; font-weight:650; min-height:42px; }
+.control-panel .form-error:empty { display:none; }
+.control-panel .form-error:not(:empty),#modal .form-error:not(:empty) { padding:12px; border:1px solid #fb718555; border-radius:10px; background:#fb718510; color:#ffc1cd; }
+.control-panel .inspector-empty { text-align:center; padding:30px 10px; }
+.control-panel .inspector-empty > span { display:grid; place-items:center; margin:0 auto 18px; width:56px; height:56px; border:1px solid #c4b5fd40; border-radius:17px; background:#c4b5fd10; color:#c4b5fd; font-size:28px; }
+.control-panel .inspector-empty h2 { font-size:18px; }
+.control-panel .inspector-empty p { color:#b5c2d9; font-size:13px; }
+.control-panel .message { padding:14px; margin:12px 0; }
+.control-panel #panel-presets button { width:100%; padding:14px; text-align:left; margin:6px 0; }
+.control-panel :is(button,summary):focus-visible,.resource-menu :is(button,summary):focus-visible { outline:2px solid #c4b5fd; outline-offset:2px; }
+#modal { width:min(540px,calc(100vw - 32px)); min-width:0; padding:26px; border-radius:20px; background:linear-gradient(145deg,#2b3756ed,#172238ed); backdrop-filter:blur(30px); }
+#modal h2 { font-size:22px; letter-spacing:-.5px; }
+#modal label { font-size:13px; color:#c4d0e5; margin:16px 0; }
+#modal menu { position:sticky; bottom:-26px; padding:16px 0; margin-bottom:-26px; background:#1b2844f5; backdrop-filter:blur(20px); }
+@media(max-width:1100px) { .control-panel { display:block; } .resource-menu-content { right:auto; left:0; } }
+@media(prefers-reduced-transparency:reduce) { .control-panel { background:#182338; } .resource-menu-content { background:#202b43; } }

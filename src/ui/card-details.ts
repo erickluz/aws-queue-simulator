@@ -116,7 +116,32 @@ export function mountInspector(host: HTMLElement, r: Resource, t: AwsTopology, s
   }
   if(r.kind==='subscription') fields+=select('Tópico SNS','topicId',r.topicId,t.topics)+select('Fila SQS','queueId',r.queueId,t.queues)+check('Entrega bruta','rawDelivery',r.rawDelivery)+`<label>Filtro de atributos (JSON)<textarea name="filter" rows="4">${escapeHtml(JSON.stringify(r.filter,null,2))}</textarea></label>`;
   host.dataset.editorId=r.id;
-  host.innerHTML=`<h2>Editar ${escapeHtml({producer:'produtor',topic:'tópico SNS',queue:'fila SQS',subscription:'assinatura',consumer:'consumidor'}[r.kind])}</h2><p>As alterações são aplicadas ao salvar.</p><form>${fields}<p class="form-error" role="alert"></p><div class="editor-actions"><button type="submit">Salvar alterações</button><button type="button" data-close>Fechar</button></div></form>`;
+  host.innerHTML=`<div class="inspector-heading"><span class="panel-eyebrow">PROPRIEDADES</span><h2>Editar ${escapeHtml({producer:'produtor',topic:'tópico SNS',queue:'fila SQS',subscription:'assinatura',consumer:'consumidor'}[r.kind])}</h2><p>As alterações são aplicadas ao salvar.</p></div><form>${fields}<p class="form-error" role="alert"></p><div class="editor-actions"><span class="save-status" role="status">Configurações salvas</span><button type="submit">Salvar alterações</button><button type="button" data-close>Fechar</button></div></form>`;
+  const form=host.querySelector('form')!;
+  const groups:[string,string[]][]=[
+    ['Identificação e conexões',['name','queueKind','targetId','queueId','topicId']],
+    ['Produção automática',['intervalMs','messagesPerEmission','invalidPercent','deduplicationMode']],
+    ['Recebimento e capacidade',['autoProcess','autoPoll','batchSize','concurrency','pollIntervalSeconds']],
+    ['Processamento e falhas',['processingSeconds','outcome','failureAction','retryDelaySeconds','limitRetries','maxRetries']],
+    ['Tempos da fila',['delaySeconds','visibilityTimeout','retentionSeconds','longPollingSeconds']],
+    ['Dead-letter queue',['deadLetterQueueId','maxReceiveCount']],
+    ['Entrega e deduplicação',['contentDeduplication','rawDelivery','filter']],
+    ['Template da mensagem',['messageBody','messageAttributes','groupId','deduplicationId']]
+  ];
+  const fragment=document.createDocumentFragment();
+  for(const [title,names] of groups) {
+    const labels=names.flatMap(name=>{const label=form.querySelector(`[name="${name}"]`)?.closest('label');return label?[label]:[];});
+    if(!labels.length) continue;
+    const group=document.createElement('fieldset'),legend=document.createElement('legend');
+    legend.textContent=title;group.append(legend,...labels);fragment.append(group);
+  }
+  const hints=Array.from(form.querySelectorAll(':scope > p:not(.form-error)'));
+  if(hints.length) {
+    const help=document.createElement('details'),summary=document.createElement('summary');
+    help.className='inspector-help';summary.textContent='Como estas configurações funcionam';help.append(summary,...hints);fragment.append(help);
+  }
+  form.prepend(fragment);
+  form.oninput=()=>{host.querySelector('.save-status')!.textContent='Alterações não salvas';};
   host.querySelector<HTMLButtonElement>('[data-close]')!.onclick=close;
   host.querySelector('form')!.onsubmit=e=>{
     e.preventDefault();
