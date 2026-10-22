@@ -1,6 +1,18 @@
-# AWS SNS + SQS Queue Lab
+# Trama
+
+<img src="public/brand/trama-logo.svg" alt="Trama — Mensageria em movimento" width="336">
+
+**Mensageria em movimento.** Um laboratório visual para explorar SNS e SQS.
 
 Simulador didático client-side de tópicos SNS e filas SQS. Não usa conta AWS, SDK, rede, credenciais ou serviços provisionados.
+
+## Identidade
+
+Trama representa as conexões entre produtores, tópicos, filas e consumidores. O símbolo ramificado expressa distribuição de mensagens; o ponto coral representa uma mensagem em movimento. A identidade combina violeta (`#C4B5FD`), verde-água (`#70E1CF`) e coral (`#FF7188`) sobre azul profundo (`#111C30`) e superfícies glass. A tipografia usa fontes do sistema, sem dependências externas.
+
+Os arquivos vetoriais estão em `public/brand/`: `trama-logo.svg` é a assinatura completa e `trama-symbol.svg` é o ícone, também usado como favicon. Use preferencialmente sobre fundos escuros, preserve as proporções e mantenha espaço livre ao redor. O produto é independente e não afiliado à AWS. O nome é uma escolha criativa; não foi realizada pesquisa de disponibilidade de marca.
+
+O nome técnico do pacote e o formato JSON `aws-queue-simulator/v1` permanecem inalterados para preservar a compatibilidade das topologias existentes.
 
 ## Executar
 

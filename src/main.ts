@@ -5,6 +5,7 @@ import './ui/editor.css';
 import './ui/card-details.css';
 import './ui/workspace.css';
 import './ui/control-panel.css';
+import './ui/brand.css';
 import { CanvasViewport, dragPosition } from './ui/viewport';
 import { allResources, details, escapeHtml as esc, mountInspector } from './ui/card-details';
 import { openResourceDialog } from './ui/resource-editor';
@@ -42,7 +43,7 @@ function render() {
   const t=engine.state.topology;
   const width=Math.max(1900,...resources().map(r=>r.position.x+340));
   const height=Math.max(1000,...resources().map(r=>r.position.y+600));
-  app.innerHTML=`<header><div><b>AWS Queue Lab</b><span>SNS + SQS visual simulator</span></div><nav>
+  app.innerHTML=`<header class="app-header"><div class="brand-lockup"><img class="brand-symbol" src="./brand/trama-symbol.svg" width="52" height="52" alt=""><div><b class="brand-name">trama<span class="brand-edition">SNS + SQS</span></b><span class="brand-tagline">Mensageria em movimento</span></div></div><nav aria-label="Ferramentas do cenário">
     <details class="resource-menu"><summary><span aria-hidden="true">＋</span> Adicionar recurso <span aria-hidden="true">⌄</span></summary><div class="resource-menu-content" aria-label="Criar recurso">
       <p>CONSTRUA SEU FLUXO</p>${([
         ['producer','↗','Produtor','Envia mensagens para SNS ou SQS'],
@@ -72,7 +73,7 @@ function render() {
     <section id="panel-events" class="panel-page" ${inspectorTab==='events'?'':'hidden'}><h2>Eventos</h2><select id="filter" aria-label="Filtrar eventos"><option value="all">Todos</option><option value="timeout">Timeout</option><option value="redrive">Redrive</option><option value="deduplicated">Deduplicação</option><option value="worker">Worker</option><option value="retry">Retry</option><option value="discard">Descarte</option></select><ol>
     ${engine.state.logs.filter(l=>logFilter==='all'||l.type===logFilter).slice(0,12).map(l=>`<li><b>${l.type}</b> ${esc(l.message)}</li>`).join('')}</ol></section>
     <section id="panel-presets" class="panel-page" ${inspectorTab==='presets'?'':'hidden'}><h2>Comece com um exemplo</h2><p>Carregar um exemplo substitui o cenário atual.</p>${button('SNS fan-out','preset:fanout')}${button('Filtro de atributo','preset:filter')}${button('FIFO/deduplicação','preset:fifo')}${button('Retry e DLQ','preset:retry')}</section>
-    </aside></main><dialog id="modal"></dialog>`;
+    </aside></main><footer class="app-footer" aria-label="Informações do laboratório"><div class="environment-status"><i aria-hidden="true"></i><strong>Simulação local</strong><span>Sem conexão com a AWS</span></div><div class="session-stats" aria-label="Resumo do cenário"><span><b>${resources().length}</b> recursos</span><span><b>${t.queues.length}</b> filas</span><span><b>${t.messages.filter(m=>['publishing','delayed','available','in-flight','redriven'].includes(m.state)).length}</b> mensagens ativas</span></div><span class="brand-disclaimer">Trama · Laboratório independente, não afiliado à AWS</span></footer><dialog id="modal"></dialog>`;
 }
 function action(value:string) {
   const split=value.indexOf(':');

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="336" height="88" viewBox="0 0 336 88" fill="none">
+  <title>Trama — Mensageria em movimento</title>
+  <defs><linearGradient id="glass" x2="1" y2="1"><stop stop-color="#303451"/><stop offset="1" stop-color="#111C30"/></linearGradient><linearGradient id="flow"><stop stop-color="#C4B5FD"/><stop offset="1" stop-color="#70E1CF"/></linearGradient></defs>
+  <g transform="translate(4 12)">
+    <rect x="1" y="1" width="62" height="62" rx="18" fill="url(#glass)" stroke="#727495" stroke-opacity=".55" stroke-width="2"/>
+    <path d="M14 32H25C36 32 31 17 43 17H49M25 32C36 32 31 47 43 47H49" stroke="url(#flow)" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="14" cy="32" r="5" fill="#C4B5FD"/><circle cx="49" cy="17" r="5" fill="#70E1CF"/><circle cx="49" cy="47" r="5" fill="#70E1CF"/><circle cx="31" cy="28" r="4" fill="#FF7188" stroke="#202A40" stroke-width="2"/>
+  </g>
+  <text x="84" y="48" fill="#F1F0FF" font-family="Segoe UI,Arial,sans-serif" font-size="38" font-weight="600" letter-spacing="-1.5">trama</text>
+  <text x="85" y="69" fill="#B3C2D9" font-family="Segoe UI,Arial,sans-serif" font-size="13">Mensageria em movimento</text>
+</svg>

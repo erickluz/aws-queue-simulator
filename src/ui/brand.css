@@ -1,0 +1,31 @@
+/* Identity is confined to the application shell; nodes and canvas keep their styling. */
+:root { --trama-ink:#111c30; --trama-violet:#c4b5fd; --trama-mint:#70e1cf; --trama-coral:#ff7188; }
+#app { height:100dvh; display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
+#app > main { height:auto; min-height:0; padding-bottom:0; }
+.app-header { margin:12px 20px 0; min-height:92px; border-color:#c4b5fd26; background:linear-gradient(115deg,#c4b5fd12,#ffffff05 55%,#70e1cf09); box-shadow:inset 0 1px #ffffff16,0 12px 40px #0002; }
+.brand-lockup { display:flex; align-items:center; gap:13px; flex-shrink:0; }
+.brand-symbol { display:block; width:52px; height:52px; filter:drop-shadow(0 6px 12px #0003); }
+.app-header .brand-name { display:flex; align-items:center; gap:14px; font-size:32px; line-height:1; font-weight:650; letter-spacing:-1.5px; color:#f1f0ff; }
+.app-header .brand-edition { display:inline-flex; margin:4px 0 0; padding:5px 7px; border:1px solid #70e1cf30; border-radius:6px; background:#70e1cf09; color:#b2e5df; font-size:10px; letter-spacing:1px; font-weight:600; white-space:nowrap; }
+.app-header .brand-tagline { margin-top:7px; color:#b3c2d9; font-size:12px; letter-spacing:.2px; }
+.app-footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 24px; margin:0 20px; min-height:42px; padding:10px 5px; color:#9faec5; font-size:11px; line-height:1.5; }
+.environment-status { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.environment-status i { width:6px; height:6px; border-radius:50%; background:var(--trama-mint); box-shadow:0 0 8px #70e1cf44; }
+.environment-status strong { color:#b5d5d3; font-weight:500; }
+.environment-status > span { padding-left:8px; border-left:1px solid #ffffff20; }
+.session-stats { display:flex; gap:16px; font-variant-numeric:tabular-nums; }
+.session-stats b { color:#d0c7ef; font-weight:600; }
+.brand-disclaimer { font-size:10px; }
+@media(max-width:1100px),(max-height:740px) {
+  body { overflow:auto; }
+  #app { height:auto; min-height:100dvh; grid-template-rows:auto 1fr auto; }
+  #app > main { height:auto; }
+  .app-footer { padding-block:14px; }
+}
+@media(max-width:600px) {
+  .app-header { padding:16px; gap:18px; }
+  .brand-symbol { width:46px; height:46px; }
+  .app-header .brand-name { font-size:29px; }
+  .app-header nav { justify-content:flex-start; }
+  .app-footer { flex-direction:column; align-items:flex-start; gap:8px; }
+}

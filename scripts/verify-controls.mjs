@@ -1,10 +1,11 @@
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 // DOM interaction checks, not visual/layout assertions.
 const bundle=await build({entryPoints:['src/main.ts'],bundle:true,write:false,format:'iife',loader:{'.css':'empty'},define:{'import.meta.hot':'undefined'},logLevel:'silent'});
-const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost',runScripts:'outside-only',pretendToBeVisual:true});
+const dom=new JSDOM(await readFile('index.html','utf8'),{url:'http://localhost',runScripts:'outside-only',pretendToBeVisual:true});
 const w=dom.window,d=w.document;
 w.structuredClone=structuredClone;
 let tick=()=>{};
@@ -24,6 +25,16 @@ const select=id=>one(`[data-id="${id}"]`).dispatchEvent(new w.KeyboardEvent('key
 const submit=selector=>one(selector).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
 try {
   w.eval(bundle.outputFiles[0].text);
+  assert.match(d.title,/Trama/);
+  assert.equal(one('link[rel="icon"]').getAttribute('href'),'./brand/trama-symbol.svg');
+  assert.equal(one('.brand-symbol').getAttribute('src'),'./brand/trama-symbol.svg');
+  assert.match(one('.app-footer').textContent,/Sem conexão com a AWS/);
+  assert.equal(one('.session-stats b').textContent,String(d.querySelectorAll('.node').length));
+  for(const file of ['trama-logo.svg','trama-symbol.svg']) {
+    const asset=new w.DOMParser().parseFromString(await readFile(`public/brand/${file}`,'utf8'),'image/svg+xml');
+    assert.equal(asset.querySelector('parsererror'),null);
+    assert.equal(asset.documentElement.localName,'svg');
+  }
   assert.equal(d.querySelectorAll('.resource-menu [data-action]').length,5);
   for(const [id,fields] of [
     ['producer-api',['name','targetId','intervalMs','messagesPerEmission','invalidPercent','deduplicationMode','messageBody','messageAttributes','groupId','deduplicationId']],
@@ -69,10 +80,14 @@ try {
     const count=d.querySelectorAll('.node').length;
     submit('#modal form');assert.equal(one('#modal').open,false);
     assert.equal(d.querySelectorAll('.node').length,count+1);
+    assert.equal(one('.session-stats b').textContent,String(count+1));
   }
   one('.resource-menu').open=true;
   one('.resource-menu').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   assert.equal(one('.resource-menu').open,false);
   select('consumer-worker');one('[data-action="poll:consumer-worker"]');
+  click('[data-action="new"]');
+  assert.equal(one('.session-stats').textContent,'0 recursos0 filas0 mensagens ativas');
+  assert.match(one('.brand-name').textContent,/trama/);
   console.log('PASS controls: all resource fields, save/validation, draft preservation, tabs, production actions, five creation dialogs and Escape');
 } finally {w.close();}
