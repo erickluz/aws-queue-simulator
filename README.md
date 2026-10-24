@@ -31,6 +31,12 @@ npm run build
 
 Abra `dist/index.html` ou publique o conteúdo da pasta `dist`.
 
+## Projetos locais
+
+Use **Salvar** para dar um nome ao fluxo e guardá-lo neste navegador. Em **Projetos**, você pode reabrir ou excluir os projetos salvos. Salve novamente para atualizar o projeto após editar o fluxo. Os dados ficam no armazenamento local do navegador, então podem desaparecer se os dados do site forem apagados.
+
+**Exportar projeto** baixa um arquivo JSON com os recursos, configurações, mensagens e posição do canvas. **Importar projeto** lê esse arquivo e cria uma nova cópia entre os projetos locais. Arquivos de topologia JSON exportados pelas versões anteriores também podem ser importados. Logs e animações em andamento não são preservados.
+
 ## Produção automática e limite de retries
 
 Clique no produtor para abrir o painel direito. Configure o intervalo entre emissões (100–60000 ms), mensagens por emissão (1–10) e a probabilidade de conteúdo inválido (0–100%). Salve e clique em **Iniciar produção**; **Pausar produção** interrompe novos envios, sem cancelar mensagens já em trânsito. O envio manual continua disponível. Em FIFO, escolha identificadores únicos por envio ou reutilize o identificador do template para demonstrar deduplicação.

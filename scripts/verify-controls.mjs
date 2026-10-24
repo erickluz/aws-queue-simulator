@@ -30,6 +30,18 @@ try {
   assert.equal(one('.brand-symbol').getAttribute('src'),'./brand/trama-symbol.svg');
   assert.match(one('.app-footer').textContent,/Sem conexão com a AWS/);
   assert.equal(one('.session-stats b').textContent,String(d.querySelectorAll('.node').length));
+  const initialCards=d.querySelectorAll('.node').length;
+  click('[data-action="save-project"]');
+  one('#project-modal [name="projectName"]').value='Fluxo de teste';
+  submit('#project-form');
+  assert.equal(one('.project-title').textContent,'Fluxo de teste');
+  assert.equal(JSON.parse(w.localStorage.getItem('trama.projects.v1')).length,1);
+  click('[data-action="new"]');
+  assert.equal(d.querySelectorAll('.node').length,0);
+  click('[data-action="projects"]');
+  click('#project-modal [data-open]');
+  assert.equal(d.querySelectorAll('.node').length,initialCards);
+  assert.equal(one('.project-title').textContent,'Fluxo de teste');
   for(const file of ['trama-logo.svg','trama-symbol.svg']) {
     const asset=new w.DOMParser().parseFromString(await readFile(`public/brand/${file}`,'utf8'),'image/svg+xml');
     assert.equal(asset.querySelector('parsererror'),null);

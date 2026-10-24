@@ -17,7 +17,7 @@ import { workerStatus } from './ui/worker-status';
 import { createPreset } from './ui/presets';
 import { AwsSimulationEngine, emptyTopology } from './core/engine';
 import { SEGMENT_DURATION } from './core/delivery';
-import { exportTopology, importTopology } from './domain/serialization';
+import { deleteProject, exportProject, importProject, listProjects, saveProject, type Project } from './domain/projects';
 import type { ResourceKind } from './domain/types';
 
 const engine=new AwsSimulationEngine();
@@ -32,6 +32,8 @@ let renderedKey='';
 let animationFrame=0;
 let viewportInitialized=false;
 let inspectorTab='config';
+let currentProjectId:string|undefined;
+let currentProjectName='';
 const button=(label:string,action:string)=>`<button data-action="${esc(action)}">${esc(label)}</button>`;
 const resources=()=>allResources(engine.state.topology);
 function selectResource(id?:string) {
@@ -52,8 +54,9 @@ function render() {
         ['subscription','⇄','Assinatura','Conecta um tópico a uma fila'],
         ['consumer','▷','Consumidor','Recebe e processa mensagens']
       ]).map(([kind,icon,title,description])=>`<button data-action="${kind}"><i aria-hidden="true">${icon}</i><span><b>${title}</b><small>${description}</small></span><em aria-hidden="true">＋</em></button>`).join('')}</div></details>
-    ${button('Novo cenário','new')}${button('Exportar','export')}
-    <label class="file">Importar<input id="import" type="file" accept="application/json"></label></nav></header>
+    <span class="project-title" title="Projeto atual">${esc(currentProjectName||'Projeto não salvo')}</span>
+    ${button('Projetos','projects')}${button('Salvar','save-project')}${button('Novo cenário','new')}${button('Exportar projeto','export')}
+    <label class="file">Importar projeto<input id="import" type="file" accept=".json,application/json"></label></nav></header>
     <main><section class="workspace"><div class="canvas-controls" role="toolbar" aria-label="Navegação do canvas">
       <button data-view="out" aria-label="Diminuir zoom">−</button><output aria-live="polite">100%</output><button data-view="in" aria-label="Aumentar zoom">+</button>
       <button data-view="reset">100%</button><button data-view="fit">Enquadrar</button><span>Arraste o fundo · Espaço + arraste · Ctrl + roda: zoom</span></div>
@@ -73,14 +76,55 @@ function render() {
     <section id="panel-events" class="panel-page" ${inspectorTab==='events'?'':'hidden'}><h2>Eventos</h2><select id="filter" aria-label="Filtrar eventos"><option value="all">Todos</option><option value="timeout">Timeout</option><option value="redrive">Redrive</option><option value="deduplicated">Deduplicação</option><option value="worker">Worker</option><option value="retry">Retry</option><option value="discard">Descarte</option></select><ol>
     ${engine.state.logs.filter(l=>logFilter==='all'||l.type===logFilter).slice(0,12).map(l=>`<li><b>${l.type}</b> ${esc(l.message)}</li>`).join('')}</ol></section>
     <section id="panel-presets" class="panel-page" ${inspectorTab==='presets'?'':'hidden'}><h2>Comece com um exemplo</h2><p>Carregar um exemplo substitui o cenário atual.</p>${button('SNS fan-out','preset:fanout')}${button('Filtro de atributo','preset:filter')}${button('FIFO/deduplicação','preset:fifo')}${button('Retry e DLQ','preset:retry')}</section>
-    </aside></main><footer class="app-footer" aria-label="Informações do laboratório"><div class="environment-status"><i aria-hidden="true"></i><strong>Simulação local</strong><span>Sem conexão com a AWS</span></div><div class="session-stats" aria-label="Resumo do cenário"><span><b>${resources().length}</b> recursos</span><span><b>${t.queues.length}</b> filas</span><span><b>${t.messages.filter(m=>['publishing','delayed','available','in-flight','redriven'].includes(m.state)).length}</b> mensagens ativas</span></div><span class="brand-disclaimer">Trama · Laboratório independente, não afiliado à AWS</span></footer><dialog id="modal"></dialog>`;
+    </aside></main><footer class="app-footer" aria-label="Informações do laboratório"><div class="environment-status"><i aria-hidden="true"></i><strong>Simulação local</strong><span>Sem conexão com a AWS</span></div><div class="session-stats" aria-label="Resumo do cenário"><span><b>${resources().length}</b> recursos</span><span><b>${t.queues.length}</b> filas</span><span><b>${t.messages.filter(m=>['publishing','delayed','available','in-flight','redriven'].includes(m.state)).length}</b> mensagens ativas</span></div><span class="brand-disclaimer">Trama · Laboratório independente, não afiliado à AWS</span></footer><dialog id="modal"></dialog><dialog id="project-modal"></dialog>`;
+}
+function projectSnapshot(name=currentProjectName||'Meu projeto'):Project {
+  return {format:'trama-project/v1',id:currentProjectId||crypto.randomUUID(),name:name.trim(),savedAt:new Date().toISOString(),topology:structuredClone(engine.state.topology),view:{...viewport.view}};
+}
+function openProject(project:Project) {
+  (document.activeElement as HTMLElement|null)?.blur();
+  selectedId=undefined;editorHost=undefined;logFilter='all';
+  currentProjectId=project.id;currentProjectName=project.name;
+  engine.load(project.topology);
+  viewport.view={...project.view};viewport.apply();
+  refresh();
+}
+function showProjects() {
+  const dialog=app.querySelector<HTMLDialogElement>('#project-modal')!;
+  let projects:Project[];
+  try {projects=listProjects();} catch(error) {alert(`Não foi possível ler os projetos locais: ${(error as Error).message}`);return;}
+  dialog.innerHTML=`<form id="project-form"><h2>Projetos locais</h2><p>Salve o fluxo neste navegador para continuar depois. Exporte um arquivo para usar em outro navegador.</p>
+    <label>Nome do projeto<input name="projectName" maxlength="100" required value="${esc(currentProjectName||engine.state.topology.name)}"></label>
+    <p class="project-error" role="alert"></p><menu><button type="button" data-close>Fechar</button><button type="submit">Salvar projeto</button></menu></form>
+    <section class="project-list"><h2>Projetos salvos</h2>${projects.length?projects.map(project=>`<div class="project-row"><div><strong>${esc(project.name)}</strong><small>Salvo em ${esc(new Date(project.savedAt).toLocaleString('pt-BR'))}</small></div><button data-open="${esc(project.id)}">Abrir</button><button data-delete="${esc(project.id)}" aria-label="Excluir ${esc(project.name)}">Excluir</button></div>`).join(''):'<p>Nenhum projeto salvo neste navegador.</p>'}</section>`;
+  dialog.showModal();
+  dialog.querySelector<HTMLInputElement>('[name="projectName"]')!.focus();
+  const close=()=>{(document.activeElement as HTMLElement|null)?.blur();dialog.close();};
+  dialog.querySelector<HTMLButtonElement>('[data-close]')!.onclick=close;
+  dialog.querySelector<HTMLFormElement>('#project-form')!.onsubmit=e=>{
+    e.preventDefault();
+    const name=dialog.querySelector<HTMLInputElement>('[name="projectName"]')!.value.trim();
+    if(!name) return;
+    try {const project=projectSnapshot(name);saveProject(project);currentProjectId=project.id;currentProjectName=name;close();refresh();}
+    catch(error){dialog.querySelector('.project-error')!.textContent=`Falha ao salvar: ${(error as Error).message}`;}
+  };
+  dialog.querySelectorAll<HTMLButtonElement>('[data-open]').forEach(button=>button.onclick=()=>{
+    const project=projects.find(item=>item.id===button.dataset.open)!;
+    close();openProject(project);
+  });
+  dialog.querySelectorAll<HTMLButtonElement>('[data-delete]').forEach(button=>button.onclick=()=>{
+    const project=projects.find(item=>item.id===button.dataset.delete)!;
+    if(!confirm(`Excluir o projeto local "${project.name}"?`)) return;
+    try {deleteProject(project.id);if(currentProjectId===project.id) currentProjectId=undefined;close();refresh();showProjects();}
+    catch(error){dialog.querySelector('.project-error')!.textContent=`Falha ao excluir: ${(error as Error).message}`;}
+  });
 }
 function action(value:string) {
   const split=value.indexOf(':');
   const kind=split<0?value:value.slice(0,split), id=split<0?'':value.slice(split+1);
   if(kind==='new') {
     if(resources().length&&!confirm('Criar um cenário vazio? Todos os cards, mensagens e eventos deste cenário serão removidos.')) return;
-    selectedId=undefined;editorHost=undefined;logFilter='all';
+    selectedId=undefined;editorHost=undefined;logFilter='all';currentProjectId=undefined;currentProjectName='';
     engine.load(emptyTopology());viewport.fit();return;
   }
   if(kind==='remove') {
@@ -96,7 +140,7 @@ function action(value:string) {
     openResourceDialog(engine,kind as ResourceKind,refresh); return;
   }
   if(kind==='preset') {
-    selectedId=undefined; editorHost=undefined;
+    selectedId=undefined; editorHost=undefined;currentProjectId=undefined;currentProjectName='';
     engine.load(createPreset(id));
     viewport.fit();
     return;
@@ -112,9 +156,11 @@ function action(value:string) {
   if(kind==='discard') engine.deleteMessage(id,true);
   if(kind==='abandon') engine.abandonMessage(id);
   if(kind==='visibility') engine.changeVisibility(id,30);
+  if(kind==='projects'||kind==='save-project') {showProjects();return;}
   if(kind==='export') {
-    const url=URL.createObjectURL(new Blob([exportTopology(engine.state.topology)],{type:'application/json'}));
-    const a=document.createElement('a'); a.href=url; a.download='aws-topology.json'; a.click();
+    const project=projectSnapshot();
+    const url=URL.createObjectURL(new Blob([exportProject(project)],{type:'application/json'}));
+    const a=document.createElement('a'); a.href=url; a.download=`${project.name.replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-|-$/g,'')||'trama-project'}.json`; a.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   refresh();
@@ -229,7 +275,7 @@ function drag(el:HTMLElement) {
 function refresh() {
   if(dragging||app.querySelector('dialog[open]')) return;
   const clock=engine.state.topology.messages.some(m=>m.processingStartedAt||m.retryArrivesAt)?Math.floor(Date.now()/1000):0;
-  const key=JSON.stringify([engine.state.topology,engine.state.logs,engine.state.animations.map(a=>a.id),selectedId,logFilter,clock,inspectorTab]);
+  const key=JSON.stringify([engine.state.topology,engine.state.logs,engine.state.animations.map(a=>a.id),selectedId,logFilter,clock,inspectorTab,currentProjectId,currentProjectName]);
   if(key===renderedKey) return;
   const focused=app.querySelector('input:focus,select:focus,textarea:focus');
   // The editor survives renders, including unfinished edits and focus.
@@ -271,8 +317,8 @@ function refresh() {
   app.querySelectorAll<HTMLButtonElement>('[data-panel-tab]').forEach(b=>b.onclick=()=>{inspectorTab=b.dataset.panelTab!;refresh();app.querySelector<HTMLButtonElement>(`[data-panel-tab="${inspectorTab}"]`)!.focus();});
   app.querySelector<HTMLInputElement>('#import')!.onchange=async e=>{
     const file=(e.target as HTMLInputElement).files?.[0];if(!file) return;
-    try {const t=importTopology(await file.text());selectedId=undefined;editorHost=undefined;engine.load(t);viewport.fit();}
-    catch(error){alert((error as Error).message);}
+    try {const project=importProject(await file.text());project.id=crypto.randomUUID();project.savedAt=new Date().toISOString();saveProject(project);openProject(project);}
+    catch(error){alert(`Não foi possível importar o projeto: ${(error as Error).message}`);(e.target as HTMLInputElement).value='';}
   };
   const filter=app.querySelector<HTMLSelectElement>('#filter')!;filter.value=logFilter;
   filter.onchange=()=>{logFilter=filter.value;filter.blur();refresh();};

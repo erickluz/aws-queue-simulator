@@ -3,5 +3,13 @@ dialog label { font-size: 12px; }
 dialog textarea { width: 100%; padding: 10px; color: #e8edf9; background: #0a102866; border: 1px solid #ffffff26; border-radius: 10px; resize: vertical; }
 dialog .check { display: flex; gap: 10px; align-items: center; }
 dialog .check input { width: auto; }
+#project-modal { width: min(620px, 95vw); }
+#project-modal .project-list { margin-top: 22px; border-top: 1px solid #ffffff26; padding-top: 16px; }
+#project-modal .project-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #ffffff18; }
+#project-modal .project-row div { flex: 1; min-width: 0; }
+#project-modal .project-row strong, #project-modal .project-row small { display: block; overflow-wrap: anywhere; }
+#project-modal .project-row small { color: #bac9df; margin-top: 4px; }
+#project-modal .project-error { color: #ffb9c1; }
+.app-header .project-title { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e4edff; }
 .form-error { color: #ffb4bd; white-space: pre-wrap; }
 button:disabled { opacity: .45; cursor: not-allowed; }
