@@ -31,6 +31,19 @@ npm run build
 
 Abra `dist/index.html` ou publique o conteúdo da pasta `dist`.
 
+## Publicar no GitHub Pages
+
+O workflow `.github/workflows/deploy-pages.yml` gera e publica a versão estática quando uma release é publicada. Pré-releases não são publicadas automaticamente. Também é possível executá-lo manualmente em **Actions → Deploy GitHub Pages → Run workflow**, escolhendo a branch ou tag desejada.
+
+Para configurar a publicação:
+
+1. Envie o workflow para a branch principal do repositório.
+2. Em **Settings → Pages**, escolha **GitHub Actions** como fonte em **Build and deployment**.
+3. Crie e publique uma release, por exemplo `v1.0.0`, apontando para o commit desejado.
+4. Acompanhe a execução em **Actions**. Após a conclusão, o site estará disponível em <https://erickluz.github.io/aws-queue-simulator/>.
+
+O Pages disponibiliza uma versão por vez; novas publicações substituem o site anterior. Projetos salvos ficam no armazenamento local do navegador: exporte-os em JSON antes de mudar de domínio ou dispositivo.
+
 ## Projetos locais
 
 Use **Salvar** para dar um nome ao fluxo e guardá-lo neste navegador. Em **Projetos**, você pode reabrir ou excluir os projetos salvos. Salve novamente para atualizar o projeto após editar o fluxo. Os dados ficam no armazenamento local do navegador, então podem desaparecer se os dados do site forem apagados.
